@@ -3,13 +3,14 @@ import { z } from "zod";
 import { createLovableAi } from "./ai-gateway.server";
 import { discoverJobs, type DiscoveredJob } from "./job-providers.server";
 import { extractJob } from "./job-extractor.server";
+import { classifyRole, applyScoreCaps } from "@/lib/role-classifier";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const matchSchema = z.object({
-  skill_score: z.number().min(0).max(100),
+  role_score: z.number().min(0).max(100),
+  technical_score: z.number().min(0).max(100),
   experience_score: z.number().min(0).max(100),
   location_score: z.number().min(0).max(100),
-  resume_score: z.number().min(0).max(100),
   matched_skills: z.array(z.string()).default([]),
   missing_skills: z.array(z.string()).default([]),
   rationale: z.string().default(""),
@@ -33,13 +34,14 @@ function categorize(score: number): "excellent" | "strong" | "moderate" | "weak"
 
 export async function scoreJobAgainstProfile(profile: any, job: any) {
   const model = createLovableAi();
+  const roleClass = classifyRole(job.title, job.description);
   const { text } = await generateText({
     model,
     messages: [
       {
         role: "system",
         content:
-          "You score a job posting against a candidate profile. Return ONLY JSON: {skill_score, experience_score, location_score, resume_score, matched_skills, missing_skills, rationale}. Each score is 0-100. skill_score weighs 40%, experience 30%, location 10%, resume 20%. Be objective. Rationale: 2 short sentences.",
+          "You score a job posting against a candidate profile. Return ONLY JSON: {role_score, technical_score, experience_score, location_score, matched_skills, missing_skills, rationale}. Each score is 0-100. WEIGHTS: role_score 40%, technical_score 30%, experience_score 20%, location_score 10%. RULES: role_score must reflect how closely the job TITLE matches the candidate's target roles — internships, sales, marketing, trading, nursing, recruiting, coordinator, or any non-software role MUST score below 20. technical_score reflects overlap between the candidate's actual tools/languages and the JOB's stated requirements; if key required technologies are absent from the candidate's resume, score below 50. Be strict and objective. matched_skills lists skills explicitly present in BOTH profile and job. missing_skills lists job-required skills the candidate lacks. Rationale: 2 short sentences.",
       },
       {
         role: "user",
@@ -65,12 +67,30 @@ export async function scoreJobAgainstProfile(profile: any, job: any) {
     ],
   });
   const parsed = matchSchema.parse(extractJson(text));
-  const overall =
-    parsed.skill_score * 0.4 +
-    parsed.experience_score * 0.3 +
-    parsed.location_score * 0.1 +
-    parsed.resume_score * 0.2;
-  return { ...parsed, overall_score: Math.round(overall * 100) / 100, category: categorize(overall) };
+  const rawOverall =
+    parsed.role_score * 0.4 +
+    parsed.technical_score * 0.3 +
+    parsed.experience_score * 0.2 +
+    parsed.location_score * 0.1;
+  const { overall, caps } = applyScoreCaps(rawOverall, {
+    roleClass,
+    matchedSkillsCount: parsed.matched_skills.length,
+    missingSkillsCount: parsed.missing_skills.length,
+  });
+  const rationale = caps.length ? `${parsed.rationale} [${caps.join("; ")}]` : parsed.rationale;
+  // Map to DB columns: skill_score = technical, resume_score = role (catch-all).
+  return {
+    skill_score: parsed.technical_score,
+    experience_score: parsed.experience_score,
+    location_score: parsed.location_score,
+    resume_score: parsed.role_score,
+    matched_skills: parsed.matched_skills,
+    missing_skills: parsed.missing_skills,
+    rationale,
+    overall_score: overall,
+    category: categorize(overall),
+    role_class: roleClass,
+  };
 }
 
 export type RunReport = {

@@ -5,8 +5,8 @@ import { createLovableAi } from "./ai-gateway.server";
 import {
   type ResumeDoc,
   resumeToDocx,
-  resumeToPlainText,
   textToPdf,
+  resumeToPdf,
 } from "./document-generators.server";
 
 const resumeSchema = z.object({
@@ -76,7 +76,7 @@ export async function runResumeGeneration(userId: string, jobId: string) {
   const resume = resumeSchema.parse(extractJson(text)) as ResumeDoc;
 
   const docxBytes = await resumeToDocx(resume);
-  const pdfBytes = await textToPdf(`${resume.name} — Resume`, resumeToPlainText(resume));
+  const pdfBytes = await resumeToPdf(resume);
   const ts = Date.now();
   const base = `${userId}/resume-${jobId}-${ts}`;
   const docxPath = `${base}.docx`;
@@ -141,6 +141,13 @@ export async function runResumeGeneration(userId: string, jobId: string) {
 
 export async function runCoverLetterGeneration(userId: string, jobId: string) {
   const { profile, job } = await loadJobWithProfile(userId, jobId);
+  // Pull the latest match (if any) so the letter can highlight matched skills.
+  const { data: matchRow } = await supabaseAdmin
+    .from("job_matches")
+    .select("matched_skills, rationale")
+    .eq("user_id", userId)
+    .eq("job_id", jobId)
+    .maybeSingle();
   const model = createLovableAi();
   const { text } = await generateText({
     model,
@@ -148,11 +155,11 @@ export async function runCoverLetterGeneration(userId: string, jobId: string) {
       {
         role: "system",
         content:
-          "You write concise, professional cover letters (max 350 words). Use only facts from the candidate profile, do not fabricate. Plain prose, 3-4 short paragraphs. Return ONLY the letter body text, no JSON, no extra labels.",
+          "You write concise, professional cover letters (max 350 words). REQUIRED: address the letter to the named company; reference the job title in paragraph 1; in paragraph 2 connect the candidate's relevant experience to 2-3 of the job's stated requirements; in paragraph 3 highlight matched skills (use the provided MATCHED_SKILLS list verbatim); close with a one-line call to action. RULES: use ONLY facts from the candidate profile and resume — do not invent employers, dates, degrees, certifications, or experience the candidate does not have. Plain prose, 3-4 short paragraphs. Return ONLY the letter body text — no JSON, no headers, no 'Dear Hiring Manager' if the company has a real name to use instead.",
       },
       {
         role: "user",
-        content: `PROFILE:\n${JSON.stringify(profile, null, 2)}\n\nJOB:\n${job.title} at ${job.company_name}\nLocation: ${job.location ?? ""}\nDescription:\n${(job.description ?? "").slice(0, 5000)}`,
+        content: `PROFILE:\n${JSON.stringify(profile, null, 2)}\n\nMATCHED_SKILLS: ${(matchRow?.matched_skills ?? []).join(", ") || "(none yet)"}\nMATCH_RATIONALE: ${matchRow?.rationale ?? "(none)"}\n\nJOB:\nCompany: ${job.company_name}\nTitle: ${job.title}\nLocation: ${job.location ?? ""}\nDescription:\n${(job.description ?? "").slice(0, 5000)}`,
       },
     ],
   });
