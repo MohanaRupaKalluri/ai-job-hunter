@@ -1,7 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Building2, Briefcase, FileText, Mail,
-  ClipboardList, BarChart3, Settings, User, Sparkles,
+  ClipboardList, BarChart3, Settings, User, Sparkles, ScrollText,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -22,6 +22,7 @@ const docs = [
 const account = [
   { title: "Profile", url: "/profile", icon: User },
   { title: "Settings", url: "/settings", icon: Settings },
+  { title: "Audit Logs", url: "/audit-logs", icon: ScrollText },
 ];
 
 export function AppSidebar() {
