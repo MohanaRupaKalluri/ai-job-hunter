@@ -23,6 +23,7 @@ import { Route as AuthenticatedCompaniesRouteImport } from './routes/_authentica
 import { Route as AuthenticatedAuditLogsRouteImport } from './routes/_authenticated/audit-logs'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 import { Route as ApiPublicCronScrapeRouteImport } from './routes/api/public/cron/scrape'
+import { Route as ApiPublicCronDigestRouteImport } from './routes/api/public/cron/digest'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -94,6 +95,11 @@ const ApiPublicCronScrapeRoute = ApiPublicCronScrapeRouteImport.update({
   path: '/api/public/cron/scrape',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicCronDigestRoute = ApiPublicCronDigestRouteImport.update({
+  id: '/api/public/cron/digest',
+  path: '/api/public/cron/digest',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -108,6 +114,7 @@ export interface FileRoutesByFullPath {
   '/resumes': typeof AuthenticatedResumesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/tracker': typeof AuthenticatedTrackerRoute
+  '/api/public/cron/digest': typeof ApiPublicCronDigestRoute
   '/api/public/cron/scrape': typeof ApiPublicCronScrapeRoute
 }
 export interface FileRoutesByTo {
@@ -123,6 +130,7 @@ export interface FileRoutesByTo {
   '/resumes': typeof AuthenticatedResumesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/tracker': typeof AuthenticatedTrackerRoute
+  '/api/public/cron/digest': typeof ApiPublicCronDigestRoute
   '/api/public/cron/scrape': typeof ApiPublicCronScrapeRoute
 }
 export interface FileRoutesById {
@@ -140,6 +148,7 @@ export interface FileRoutesById {
   '/_authenticated/resumes': typeof AuthenticatedResumesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/tracker': typeof AuthenticatedTrackerRoute
+  '/api/public/cron/digest': typeof ApiPublicCronDigestRoute
   '/api/public/cron/scrape': typeof ApiPublicCronScrapeRoute
 }
 export interface FileRouteTypes {
@@ -157,6 +166,7 @@ export interface FileRouteTypes {
     | '/resumes'
     | '/settings'
     | '/tracker'
+    | '/api/public/cron/digest'
     | '/api/public/cron/scrape'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -172,6 +182,7 @@ export interface FileRouteTypes {
     | '/resumes'
     | '/settings'
     | '/tracker'
+    | '/api/public/cron/digest'
     | '/api/public/cron/scrape'
   id:
     | '__root__'
@@ -188,6 +199,7 @@ export interface FileRouteTypes {
     | '/_authenticated/resumes'
     | '/_authenticated/settings'
     | '/_authenticated/tracker'
+    | '/api/public/cron/digest'
     | '/api/public/cron/scrape'
   fileRoutesById: FileRoutesById
 }
@@ -195,6 +207,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicCronDigestRoute: typeof ApiPublicCronDigestRoute
   ApiPublicCronScrapeRoute: typeof ApiPublicCronScrapeRoute
 }
 
@@ -298,6 +311,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicCronScrapeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/cron/digest': {
+      id: '/api/public/cron/digest'
+      path: '/api/public/cron/digest'
+      fullPath: '/api/public/cron/digest'
+      preLoaderRoute: typeof ApiPublicCronDigestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -334,8 +354,19 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicCronDigestRoute: ApiPublicCronDigestRoute,
   ApiPublicCronScrapeRoute: ApiPublicCronScrapeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
