@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery, queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listCompanies, createCompany, updateCompany, deleteCompany, bulkImportCompanies } from "@/lib/api/companies.functions";
+import { triggerScrapeForMe } from "@/lib/api/jobs.functions";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { useState, useRef } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Upload } from "lucide-react";
+import { Plus, Trash2, Upload, RefreshCw, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/companies")({ component: CompaniesPage });
 
@@ -21,6 +22,7 @@ function CompaniesPage() {
   const updateFn = useServerFn(updateCompany);
   const deleteFn = useServerFn(deleteCompany);
   const bulkFn = useServerFn(bulkImportCompanies);
+  const scrapeFn = useServerFn(triggerScrapeForMe);
   const qc = useQueryClient();
   const { data: companies } = useSuspenseQuery(queryOptions({ queryKey: ["companies"], queryFn: () => listFn() }));
 
@@ -45,6 +47,19 @@ function CompaniesPage() {
   const del = useMutation({
     mutationFn: (id: string) => deleteFn({ data: { id } }),
     onSuccess: () => { toast.success("Removed"); invalidate(); },
+  });
+
+  const scrapeOne = useMutation({
+    mutationFn: (companyId: string) => scrapeFn({ data: { companyId } }),
+    onSuccess: (r: any) => {
+      const cs = r?.companyStatuses?.[0];
+      toast.success(
+        `${cs?.company ?? "Company"}: ${cs?.status ?? "ok"} · saved ${r.newJobs}/${r.scraped} · skipped ${r.skipped} · scored ${r.scored}`,
+      );
+      invalidate();
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   async function handleCsv(file: File) {
@@ -105,7 +120,7 @@ function CompaniesPage() {
                 <TableHead>Careers URL</TableHead>
                 <TableHead>Last scraped</TableHead>
                 <TableHead>Tracking</TableHead>
-                <TableHead className="w-12"></TableHead>
+                <TableHead className="w-32"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -113,9 +128,19 @@ function CompaniesPage() {
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   <TableCell className="max-w-xs truncate"><a href={c.careers_url} target="_blank" rel="noreferrer" className="text-primary underline">{c.careers_url}</a></TableCell>
-                  <TableCell className="text-muted-foreground">{c.last_scraped_at ? new Date(c.last_scraped_at).toLocaleString() : "Never"}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {c.last_scraped_at ? new Date(c.last_scraped_at).toLocaleString() : "Never"}
+                    {c.last_scrape_status ? <div className="opacity-70">{c.last_scrape_status}</div> : null}
+                  </TableCell>
                   <TableCell><Switch checked={c.tracking_enabled} onCheckedChange={(v) => toggle.mutate({ id: c.id, tracking_enabled: v })} /></TableCell>
-                  <TableCell><Button size="icon" variant="ghost" onClick={() => del.mutate(c.id)}><Trash2 className="h-4 w-4" /></Button></TableCell>
+                  <TableCell>
+                    <div className="flex gap-1 justify-end">
+                      <Button size="icon" variant="ghost" title="Scrape this company" disabled={scrapeOne.isPending} onClick={() => scrapeOne.mutate(c.id)}>
+                        {scrapeOne.isPending && scrapeOne.variables === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => del.mutate(c.id)}><Trash2 className="h-4 w-4" /></Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
