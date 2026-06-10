@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
-import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2, Plus } from "lucide-react";
+import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2, Plus, Trash2, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { listJobs, triggerScrapeForMe, importJobManual } from "@/lib/api/jobs.functions";
+import { listJobs, triggerScrapeForMe, importJobManual, clearAllJobs } from "@/lib/api/jobs.functions";
 import { generateResumeForJob, generateCoverLetterForJob } from "@/lib/api/documents.functions";
 import { upsertApplication, recordApplyAction } from "@/lib/api/applications.functions";
 
@@ -38,6 +38,7 @@ function JobsPage() {
   const listFn = useServerFn(listJobs);
   const scrapeFn = useServerFn(triggerScrapeForMe);
   const importFn = useServerFn(importJobManual);
+  const clearFn = useServerFn(clearAllJobs);
   const resumeFn = useServerFn(generateResumeForJob);
   const coverFn = useServerFn(generateCoverLetterForJob);
   const saveFn = useServerFn(upsertApplication);
@@ -48,6 +49,8 @@ function JobsPage() {
   const [category, setCategory] = useState<"all"|"excellent"|"strong"|"moderate"|"weak">("all");
   const [sortBy, setSortBy] = useState<"score"|"newest">("score");
   const [confirmJob, setConfirmJob] = useState<{id:string; apply_url:string; title:string}|null>(null);
+  const [confirmScrape, setConfirmScrape] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importForm, setImportForm] = useState({ url: "", title: "", company: "", location: "", description: "" });
 
@@ -57,12 +60,18 @@ function JobsPage() {
   });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["jobs"] });
   const scrape = useMutation({
-    mutationFn: () => scrapeFn(),
+    mutationFn: () => scrapeFn({ data: {} }),
     onSuccess: (r: any) => {
-      const srcs = r?.sources ? Object.entries(r.sources).filter(([, n]) => (n as number) > 0).map(([k, n]) => `${k}:${n}`).join(" · ") : "";
-      toast.success(`Scraped ${r.scraped} · ${r.newJobs} new · ${r.matched} matched${srcs ? ` (${srcs})` : ""}`);
+      toast.success(
+        `Checked ${r.companiesChecked} cos · found ${r.scraped} · saved ${r.newJobs} · skipped ${r.skipped} · scored ${r.scored}${r.errors?.length ? ` · ${r.errors.length} errors` : ""}`,
+      );
       invalidate();
     },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const clearJobs = useMutation({
+    mutationFn: () => clearFn(),
+    onSuccess: () => { toast.success("All jobs cleared"); setConfirmClear(false); invalidate(); },
     onError: (e: Error) => toast.error(e.message),
   });
   const importJob = useMutation({
@@ -94,7 +103,8 @@ function JobsPage() {
           <Button variant="outline" onClick={() => exportRows("csv")} disabled={!jobs?.length}><Download className="h-4 w-4 mr-2" />CSV</Button>
           <Button variant="outline" onClick={() => exportRows("xlsx")} disabled={!jobs?.length}><Download className="h-4 w-4 mr-2" />XLSX</Button>
           <Button variant="outline" onClick={() => setImportOpen(true)}><Plus className="h-4 w-4 mr-2" />Import URL</Button>
-          <Button onClick={() => scrape.mutate()} disabled={scrape.isPending}>{scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}Scrape now</Button>
+          <Button variant="outline" onClick={() => setConfirmClear(true)} disabled={!jobs?.length}><Trash2 className="h-4 w-4 mr-2" />Clear jobs</Button>
+          <Button onClick={() => setConfirmScrape(true)} disabled={scrape.isPending}>{scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}Scrape now</Button>
         </div>
       </div>
       <Card className="p-4"><div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -144,6 +154,32 @@ function JobsPage() {
           <DialogFooter>
             <Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button>
             <Button onClick={() => importJob.mutate()} disabled={!importForm.url || importJob.isPending}>{importJob.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Import job</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={confirmScrape} onOpenChange={setConfirmScrape}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-400" />Scrape all tracked companies?</DialogTitle>
+            <DialogDescription>
+              This checks every company with tracking enabled. To stay within timeouts and AI budget, each run is capped at <strong>10 jobs per company</strong> and <strong>50 jobs total</strong>. Only roles matching .NET / C# / ASP.NET / Software Engineer / Full Stack / Backend / SQL Server / Azure / Java are saved. Remaining jobs are queued for the next run.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmScrape(false)}>Cancel</Button>
+            <Button onClick={() => { setConfirmScrape(false); scrape.mutate(); }}>Run full scrape</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear all jobs?</DialogTitle>
+            <DialogDescription>This permanently deletes every discovered job and its match scores. Use for testing. Applications and generated documents are not deleted.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmClear(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => clearJobs.mutate()} disabled={clearJobs.isPending}>{clearJobs.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Delete all</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

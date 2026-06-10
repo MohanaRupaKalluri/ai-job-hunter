@@ -77,31 +77,84 @@ export type RunReport = {
   scraped: number;
   newJobs: number;
   matched: number;
+  skipped: number;
+  scored: number;
+  companiesChecked: number;
   errors: { company: string; error: string }[];
+  companyStatuses?: { company: string; status: "success" | "partial" | "failed" | "timeout"; found: number; saved: number; skipped: number; scored: number; source?: string; error?: string }[];
   sources?: Record<string, number>;
 };
 
-export async function runScrapeForUser(userId: string): Promise<RunReport> {
-  const report: RunReport = { ok: true, scraped: 0, newJobs: 0, matched: 0, errors: [], sources: {} };
+const ROLE_KEYWORDS = [
+  ".net", "c#", "asp.net", "software engineer", "full stack", "fullstack",
+  "full-stack", "backend", "back-end", "sql server", "azure", "java",
+];
+function matchesRoleFilter(j: { title?: string | null; description?: string | null }) {
+  const hay = `${j.title ?? ""}\n${j.description ?? ""}`.toLowerCase();
+  return ROLE_KEYWORDS.some((k) => hay.includes(k));
+}
+
+const MAX_JOBS_PER_COMPANY = 10;
+const MAX_JOBS_PER_RUN = 50;
+const COMPANY_TIMEOUT_MS = 5 * 60 * 1000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+export async function runScrapeForUser(
+  userId: string,
+  opts: { companyId?: string } = {},
+): Promise<RunReport> {
+  const report: RunReport = {
+    ok: true, scraped: 0, newJobs: 0, matched: 0, skipped: 0, scored: 0,
+    companiesChecked: 0, errors: [], companyStatuses: [], sources: {},
+  };
 
   const { data: profile } = await supabaseAdmin.from("profiles").select("*").eq("id", userId).maybeSingle();
-  const { data: companies } = await supabaseAdmin
-    .from("companies")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("tracking_enabled", true);
+  let cq = supabaseAdmin.from("companies").select("*").eq("user_id", userId);
+  if (opts.companyId) cq = cq.eq("id", opts.companyId);
+  else cq = cq.eq("tracking_enabled", true);
+  const { data: companies } = await cq;
+
+  let totalSavedThisRun = 0;
 
   for (const c of companies ?? []) {
-    let status = "ok";
     let errorMsg: string | null = null;
     let source = "generic";
+    const cStat = { company: c.name, status: "success" as "success"|"partial"|"failed"|"timeout", found: 0, saved: 0, skipped: 0, scored: 0, source: undefined as string | undefined, error: undefined as string | undefined };
+    report.companiesChecked += 1;
+    if (totalSavedThisRun >= MAX_JOBS_PER_RUN) {
+      cStat.status = "partial";
+      cStat.error = "run cap reached; queued for next run";
+      report.companyStatuses!.push(cStat);
+      continue;
+    }
     try {
-      const result = await discoverJobs(c.careers_url);
+      const result = await withTimeout(discoverJobs(c.careers_url), COMPANY_TIMEOUT_MS, `Scrape ${c.name}`);
       source = result.source;
+      cStat.source = source;
       report.sources![source] = (report.sources![source] ?? 0) + result.jobs.length;
-      const jobs = result.jobs;
-      report.scraped += jobs.length;
-      for (const j of jobs as DiscoveredJob[]) {
+      const allJobs = result.jobs as DiscoveredJob[];
+      cStat.found = allJobs.length;
+      report.scraped += allJobs.length;
+
+      // Role filter BEFORE saving / AI scoring.
+      const relevant = allJobs.filter(matchesRoleFilter);
+      const skippedHere = allJobs.length - relevant.length;
+      cStat.skipped += skippedHere;
+      report.skipped += skippedHere;
+
+      // Per-company batch cap + global run cap.
+      const remainingRun = MAX_JOBS_PER_RUN - totalSavedThisRun;
+      const batch = relevant.slice(0, Math.min(MAX_JOBS_PER_COMPANY, remainingRun));
+      const queuedForNext = relevant.length - batch.length;
+      if (queuedForNext > 0) cStat.status = "partial";
+
+      for (const j of batch) {
         const { data: inserted, error: insErr } = await supabaseAdmin
           .from("jobs")
           .upsert(
@@ -125,6 +178,8 @@ export async function runScrapeForUser(userId: string): Promise<RunReport> {
         if (insErr) continue;
         if (!inserted) continue;
         report.newJobs += 1;
+        cStat.saved += 1;
+        totalSavedThisRun += 1;
         if (profile) {
           try {
             const score = await scoreJobAgainstProfile(profile, inserted);
@@ -145,19 +200,29 @@ export async function runScrapeForUser(userId: string): Promise<RunReport> {
               { onConflict: "user_id,job_id" },
             );
             report.matched += 1;
+            report.scored += 1;
+            cStat.scored += 1;
           } catch (e) {
             // continue on AI scoring errors
           }
         }
+        if (totalSavedThisRun >= MAX_JOBS_PER_RUN) break;
       }
     } catch (e) {
-      status = "error";
       errorMsg = (e as Error).message;
+      cStat.status = /timed out/i.test(errorMsg) ? "timeout" : "failed";
+      cStat.error = errorMsg;
       report.errors.push({ company: c.name, error: errorMsg });
     }
+    report.companyStatuses!.push(cStat);
     await supabaseAdmin
       .from("companies")
-      .update({ last_scraped_at: new Date().toISOString(), last_scrape_status: errorMsg ? `error: ${errorMsg.slice(0, 200)}` : `${status} (${source})` })
+      .update({
+        last_scraped_at: new Date().toISOString(),
+        last_scrape_status: errorMsg
+          ? `${cStat.status}: ${errorMsg.slice(0, 200)}`
+          : `${cStat.status} (${source}) ${cStat.saved}/${cStat.found}`,
+      })
       .eq("id", c.id);
   }
 
