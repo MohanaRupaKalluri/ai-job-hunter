@@ -1,6 +1,112 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
+import * as XLSX from "xlsx";
+import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-export const Route = createFileRoute("/_authenticated/jobs")({ component: () => <Placeholder title="Jobs" desc="Discovered jobs will appear here once the scraper runs (Phase 2)." /> });
-function Placeholder({ title, desc }: { title: string; desc: string }) {
-  return <div className="space-y-4"><h1 className="text-2xl font-semibold">{title}</h1><Card className="p-12 text-center text-muted-foreground">{desc}</Card></div>;
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { listJobs, triggerScrapeForMe } from "@/lib/api/jobs.functions";
+import { generateResumeForJob, generateCoverLetterForJob } from "@/lib/api/documents.functions";
+import { upsertApplication, recordApplyAction } from "@/lib/api/applications.functions";
+
+export const Route = createFileRoute("/_authenticated/jobs")({ component: JobsPage });
+
+function scoreColor(s: number) {
+  if (s >= 85) return "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+  if (s >= 75) return "bg-sky-500/20 text-sky-300 border-sky-500/30";
+  if (s >= 60) return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+  return "bg-muted text-muted-foreground border-border";
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function JobsPage() {
+  const qc = useQueryClient();
+  const listFn = useServerFn(listJobs);
+  const scrapeFn = useServerFn(triggerScrapeForMe);
+  const resumeFn = useServerFn(generateResumeForJob);
+  const coverFn = useServerFn(generateCoverLetterForJob);
+  const saveFn = useServerFn(upsertApplication);
+  const recordFn = useServerFn(recordApplyAction);
+
+  const [search, setSearch] = useState("");
+  const [minScore, setMinScore] = useState("0");
+  const [category, setCategory] = useState<"all"|"excellent"|"strong"|"moderate"|"weak">("all");
+  const [sortBy, setSortBy] = useState<"score"|"newest">("score");
+  const [confirmJob, setConfirmJob] = useState<{id:string; apply_url:string; title:string}|null>(null);
+
+  const { data: jobs, isLoading } = useQuery({
+    queryKey: ["jobs", search, minScore, category, sortBy],
+    queryFn: () => listFn({ data: { search: search || undefined, minScore: Number(minScore) || undefined, category, sortBy } }),
+  });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["jobs"] });
+  const scrape = useMutation({ mutationFn: () => scrapeFn(), onSuccess: (r: any) => { if (r?.skippedNoFirecrawl) toast.error("Connect Firecrawl in Settings to enable scraping."); else toast.success(`Scraped ${r.scraped} jobs · ${r.newJobs} new · ${r.matched} matched.`); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
+  const makeResume = useMutation({ mutationFn: (id: string) => resumeFn({ data: { job_id: id } }), onSuccess: () => { toast.success("Resume generated."); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
+  const makeCover = useMutation({ mutationFn: (id: string) => coverFn({ data: { job_id: id } }), onSuccess: () => { toast.success("Cover letter generated."); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
+  const addToTracker = useMutation({ mutationFn: (id: string) => saveFn({ data: { job_id: id, status: "found" } }), onSuccess: () => { toast.success("Added to tracker."); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
+
+  function exportRows(format: "csv"|"xlsx") {
+    if (!jobs?.length) return;
+    const rows = jobs.map((j: any) => ({ Title: j.title, Company: j.company_name, Location: j.location ?? "", Type: j.employment_type ?? "", Score: j.match?.overall_score ?? "", Category: j.match?.category ?? "", "Apply URL": j.apply_url, Discovered: j.discovered_at }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    if (format === "csv") { downloadBlob(new Blob([XLSX.utils.sheet_to_csv(ws)], { type: "text/csv" }), "jobs.csv"); return; }
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Jobs");
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    downloadBlob(new Blob([buf], { type: "application/octet-stream" }), "jobs.xlsx");
+  }
+
+  function confirmApply() { if (!confirmJob) return; recordFn({ data: { job_id: confirmJob.id, apply_url: confirmJob.apply_url } }); window.open(confirmJob.apply_url, "_blank", "noopener,noreferrer"); setConfirmJob(null); }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div><h1 className="text-2xl font-semibold">Jobs</h1><p className="text-muted-foreground text-sm">Discovered jobs scored against your profile</p></div>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" onClick={() => exportRows("csv")} disabled={!jobs?.length}><Download className="h-4 w-4 mr-2" />CSV</Button>
+          <Button variant="outline" onClick={() => exportRows("xlsx")} disabled={!jobs?.length}><Download className="h-4 w-4 mr-2" />XLSX</Button>
+          <Button onClick={() => scrape.mutate()} disabled={scrape.isPending}>{scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}Scrape now</Button>
+        </div>
+      </div>
+      <Card className="p-4"><div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <Input placeholder="Search title or company…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Select value={minScore} onValueChange={setMinScore}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="0">Any score</SelectItem><SelectItem value="60">60+</SelectItem><SelectItem value="75">75+ (Strong)</SelectItem><SelectItem value="85">85+ (Excellent)</SelectItem></SelectContent></Select>
+        <Select value={category} onValueChange={(v) => setCategory(v as any)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All categories</SelectItem><SelectItem value="excellent">Excellent</SelectItem><SelectItem value="strong">Strong</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="weak">Weak</SelectItem></SelectContent></Select>
+        <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="score">Sort by score</SelectItem><SelectItem value="newest">Sort by newest</SelectItem></SelectContent></Select>
+      </div></Card>
+      {isLoading ? (<Card className="p-12 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" /></Card>) : !jobs?.length ? (<Card className="p-12 text-center text-muted-foreground"><p className="font-medium">No jobs yet.</p><p className="text-sm mt-1">Add companies and click "Scrape now", or wait for the next 12h run.</p></Card>) : (<div className="grid gap-3">{jobs.map((j: any) => { const score = j.match?.overall_score ?? 0; const canGen = score >= 75; return (
+        <Card key={j.id} className="p-4"><div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold truncate">{j.title}</h3>{j.match && (<Badge variant="outline" className={scoreColor(score)}><Sparkles className="h-3 w-3 mr-1" />{score} • {j.match.category}</Badge>)}</div>
+            <p className="text-sm text-muted-foreground mt-0.5">{j.company_name}{j.location ? ` • ${j.location}` : ""}{j.employment_type ? ` • ${j.employment_type}` : ""}</p>
+            {j.match?.rationale && (<p className="text-xs text-muted-foreground mt-2 line-clamp-2">{j.match.rationale}</p>)}
+            {j.match?.matched_skills?.length ? (<div className="flex flex-wrap gap-1 mt-2">{j.match.matched_skills.slice(0,6).map((s: string) => (<Badge key={s} variant="secondary" className="text-xs">{s}</Badge>))}</div>) : null}
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={() => addToTracker.mutate(j.id)}><Bookmark className="h-4 w-4 mr-1" />Track</Button>
+            <Button variant="outline" size="sm" disabled={!canGen || makeResume.isPending} onClick={() => makeResume.mutate(j.id)} title={canGen ? "Generate ATS resume" : "Available for 75+ matches"}>{makeResume.isPending && makeResume.variables === j.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileText className="h-4 w-4 mr-1" />}Resume</Button>
+            <Button variant="outline" size="sm" disabled={makeCover.isPending} onClick={() => makeCover.mutate(j.id)}>{makeCover.isPending && makeCover.variables === j.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Mail className="h-4 w-4 mr-1" />}Cover</Button>
+            <Button size="sm" onClick={() => setConfirmJob({ id: j.id, apply_url: j.apply_url, title: j.title })}><ExternalLink className="h-4 w-4 mr-1" />Apply</Button>
+          </div>
+        </div></Card>
+      ); })}</div>)}
+      <Dialog open={!!confirmJob} onOpenChange={(o) => !o && setConfirmJob(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Open application page?</DialogTitle><DialogDescription>AI Job Hunter never submits applications for you. We'll open the employer's apply URL in a new tab so you can review and submit it yourself.</DialogDescription></DialogHeader>
+          <p className="text-sm bg-muted p-3 rounded font-mono break-all">{confirmJob?.apply_url}</p>
+          <DialogFooter><Button variant="ghost" onClick={() => setConfirmJob(null)}>Cancel</Button><Button onClick={confirmApply}>I understand, open page</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 }
