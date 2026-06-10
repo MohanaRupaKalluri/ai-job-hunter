@@ -1,3 +1,0 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Card } from "@/components/ui/card";
-export const Route = createFileRoute("/_authenticated/settings")({ component: () => <div className="space-y-4"><h1 className="text-2xl font-semibold">Settings</h1><Card className="p-12 text-center text-muted-foreground">Notification preferences, integrations, and export options (Phase 4).</Card></div> });
