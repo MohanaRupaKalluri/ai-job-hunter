@@ -217,9 +217,13 @@ export async function runScrapeForUser(
     report.companyStatuses!.push(cStat);
     await supabaseAdmin
       .from("companies")
-      .update({ last_scraped_at: new Date().toISOString(), last_scrape_status: errorMsg ? `error: ${errorMsg.slice(0, 200)}` : `${status} (${source})` })
+      .update({
+        last_scraped_at: new Date().toISOString(),
+        last_scrape_status: errorMsg
+          ? `${cStat.status}: ${errorMsg.slice(0, 200)}`
+          : `${cStat.status} (${source}) ${cStat.saved}/${cStat.found}`,
+      })
       .eq("id", c.id);
-    void status;
   }
 
   await supabaseAdmin.from("action_logs").insert({
