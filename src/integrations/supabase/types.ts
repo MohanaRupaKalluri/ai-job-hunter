@@ -313,7 +313,21 @@ export type Database = {
           phone: string | null
           portfolio_url: string | null
           preferred_locations: string[]
+          profile_resume_text: string | null
           remote_preference: Database["public"]["Enums"]["remote_preference"]
+          resume_error: string | null
+          resume_filename: string | null
+          resume_mime_type: string | null
+          resume_parsed_certifications: string[]
+          resume_parsed_education: Json
+          resume_parsed_experience: Json
+          resume_parsed_skills: string[]
+          resume_parsed_technologies: string[]
+          resume_parsed_years_experience: number | null
+          resume_path: string | null
+          resume_size_bytes: number | null
+          resume_status: string
+          resume_uploaded_at: string | null
           salary_currency: string | null
           salary_max: number | null
           salary_min: number | null
@@ -336,7 +350,21 @@ export type Database = {
           phone?: string | null
           portfolio_url?: string | null
           preferred_locations?: string[]
+          profile_resume_text?: string | null
           remote_preference?: Database["public"]["Enums"]["remote_preference"]
+          resume_error?: string | null
+          resume_filename?: string | null
+          resume_mime_type?: string | null
+          resume_parsed_certifications?: string[]
+          resume_parsed_education?: Json
+          resume_parsed_experience?: Json
+          resume_parsed_skills?: string[]
+          resume_parsed_technologies?: string[]
+          resume_parsed_years_experience?: number | null
+          resume_path?: string | null
+          resume_size_bytes?: number | null
+          resume_status?: string
+          resume_uploaded_at?: string | null
           salary_currency?: string | null
           salary_max?: number | null
           salary_min?: number | null
@@ -359,7 +387,21 @@ export type Database = {
           phone?: string | null
           portfolio_url?: string | null
           preferred_locations?: string[]
+          profile_resume_text?: string | null
           remote_preference?: Database["public"]["Enums"]["remote_preference"]
+          resume_error?: string | null
+          resume_filename?: string | null
+          resume_mime_type?: string | null
+          resume_parsed_certifications?: string[]
+          resume_parsed_education?: Json
+          resume_parsed_experience?: Json
+          resume_parsed_skills?: string[]
+          resume_parsed_technologies?: string[]
+          resume_parsed_years_experience?: number | null
+          resume_path?: string | null
+          resume_size_bytes?: number | null
+          resume_status?: string
+          resume_uploaded_at?: string | null
           salary_currency?: string | null
           salary_max?: number | null
           salary_min?: number | null
@@ -367,6 +409,39 @@ export type Database = {
           updated_at?: string
           visa_sponsorship_required?: boolean
           years_experience?: number | null
+        }
+        Relationships: []
+      }
+      resume_archive: {
+        Row: {
+          archived_at: string
+          filename: string | null
+          id: string
+          mime_type: string | null
+          size_bytes: number | null
+          storage_path: string
+          uploaded_at: string | null
+          user_id: string
+        }
+        Insert: {
+          archived_at?: string
+          filename?: string | null
+          id?: string
+          mime_type?: string | null
+          size_bytes?: number | null
+          storage_path: string
+          uploaded_at?: string | null
+          user_id: string
+        }
+        Update: {
+          archived_at?: string
+          filename?: string | null
+          id?: string
+          mime_type?: string | null
+          size_bytes?: number | null
+          storage_path?: string
+          uploaded_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }

@@ -17,7 +17,7 @@ const profileSchema = z.object({
   linkedin_url: z.string().trim().url().max(500).nullable().optional().or(z.literal("")),
   github_url: z.string().trim().url().max(500).nullable().optional().or(z.literal("")),
   portfolio_url: z.string().trim().url().max(500).nullable().optional().or(z.literal("")),
-  current_resume_url: z.string().trim().max(1000).nullable().optional(),
+  current_resume_url: z.string().trim().max(1000).nullable().optional(), // legacy, ignored
   skills: z.array(z.string().trim().max(60)).max(200).default([]),
   years_experience: z.number().min(0).max(80).nullable().optional(),
   desired_roles: z.array(z.string().trim().max(120)).max(50).default([]),

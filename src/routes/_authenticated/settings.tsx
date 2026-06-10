@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Loader2, RefreshCw, Mail, Search, ShieldCheck, Clock } from "lucide-react";
+import { Loader2, RefreshCw, Mail, Search, ShieldCheck, Clock, FileText } from "lucide-react";
 import { triggerScrapeForMe } from "@/lib/api/jobs.functions";
 import { getMyProfile, upsertMyProfile } from "@/lib/api/profile.functions";
 import { supabase } from "@/integrations/supabase/client";
@@ -31,9 +31,29 @@ function SettingsPage() {
 
   async function signOut() { await supabase.auth.signOut(); navigate({ to: "/auth" }); }
 
+  const p: any = profile ?? {};
+  const resumeStatus = p.resume_status ?? "none";
+
   return (
     <div className="space-y-6 max-w-3xl">
       <div><h1 className="text-2xl font-semibold">Settings</h1><p className="text-muted-foreground text-sm">Integrations, automations, and account</p></div>
+
+      <Card className="p-5 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-primary" /><h3 className="font-semibold">Resume</h3></div>
+          <Badge variant="outline" className={resumeStatus === "ready" ? "border-emerald-500/40 text-emerald-300" : ""}>{resumeStatus}</Badge>
+        </div>
+        {p.resume_path ? (
+          <ul className="text-sm text-muted-foreground space-y-1">
+            <li>• File: <span className="text-foreground">{p.resume_filename}</span></li>
+            <li>• Last upload: <span className="text-foreground">{p.resume_uploaded_at ? new Date(p.resume_uploaded_at).toLocaleString() : "—"}</span></li>
+            <li>• Parsed skills: <span className="text-foreground">{(p.resume_parsed_skills ?? []).length}</span></li>
+            <li>• Parsed experience: <span className="text-foreground">{p.resume_parsed_years_experience ?? "—"} yrs</span></li>
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">No resume uploaded yet. Add one on the <span className="text-foreground">Profile</span> page to power AI job matching.</p>
+        )}
+      </Card>
 
       <Card className="p-5 space-y-3">
         <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Search className="h-4 w-4 text-primary" /><h3 className="font-semibold">Job discovery</h3></div><Badge variant="outline" className="border-emerald-500/40 text-emerald-300">Built-in · No key needed</Badge></div>
