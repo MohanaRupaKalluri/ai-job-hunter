@@ -22,6 +22,7 @@ import { Route as AuthenticatedCoverLettersRouteImport } from './routes/_authent
 import { Route as AuthenticatedCompaniesRouteImport } from './routes/_authenticated/companies'
 import { Route as AuthenticatedAuditLogsRouteImport } from './routes/_authenticated/audit-logs'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
+import { Route as AuthenticatedJobsIdRouteImport } from './routes/_authenticated/jobs.$id'
 import { Route as ApiPublicCronScrapeRouteImport } from './routes/api/public/cron/scrape'
 import { Route as ApiPublicCronDigestRouteImport } from './routes/api/public/cron/digest'
 
@@ -90,6 +91,11 @@ const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
   path: '/analytics',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedJobsIdRoute = AuthenticatedJobsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AuthenticatedJobsRoute,
+} as any)
 const ApiPublicCronScrapeRoute = ApiPublicCronScrapeRouteImport.update({
   id: '/api/public/cron/scrape',
   path: '/api/public/cron/scrape',
@@ -109,11 +115,12 @@ export interface FileRoutesByFullPath {
   '/companies': typeof AuthenticatedCompaniesRoute
   '/cover-letters': typeof AuthenticatedCoverLettersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/jobs': typeof AuthenticatedJobsRoute
+  '/jobs': typeof AuthenticatedJobsRouteWithChildren
   '/profile': typeof AuthenticatedProfileRoute
   '/resumes': typeof AuthenticatedResumesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/tracker': typeof AuthenticatedTrackerRoute
+  '/jobs/$id': typeof AuthenticatedJobsIdRoute
   '/api/public/cron/digest': typeof ApiPublicCronDigestRoute
   '/api/public/cron/scrape': typeof ApiPublicCronScrapeRoute
 }
@@ -125,11 +132,12 @@ export interface FileRoutesByTo {
   '/companies': typeof AuthenticatedCompaniesRoute
   '/cover-letters': typeof AuthenticatedCoverLettersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/jobs': typeof AuthenticatedJobsRoute
+  '/jobs': typeof AuthenticatedJobsRouteWithChildren
   '/profile': typeof AuthenticatedProfileRoute
   '/resumes': typeof AuthenticatedResumesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/tracker': typeof AuthenticatedTrackerRoute
+  '/jobs/$id': typeof AuthenticatedJobsIdRoute
   '/api/public/cron/digest': typeof ApiPublicCronDigestRoute
   '/api/public/cron/scrape': typeof ApiPublicCronScrapeRoute
 }
@@ -143,11 +151,12 @@ export interface FileRoutesById {
   '/_authenticated/companies': typeof AuthenticatedCompaniesRoute
   '/_authenticated/cover-letters': typeof AuthenticatedCoverLettersRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
-  '/_authenticated/jobs': typeof AuthenticatedJobsRoute
+  '/_authenticated/jobs': typeof AuthenticatedJobsRouteWithChildren
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/resumes': typeof AuthenticatedResumesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/tracker': typeof AuthenticatedTrackerRoute
+  '/_authenticated/jobs/$id': typeof AuthenticatedJobsIdRoute
   '/api/public/cron/digest': typeof ApiPublicCronDigestRoute
   '/api/public/cron/scrape': typeof ApiPublicCronScrapeRoute
 }
@@ -166,6 +175,7 @@ export interface FileRouteTypes {
     | '/resumes'
     | '/settings'
     | '/tracker'
+    | '/jobs/$id'
     | '/api/public/cron/digest'
     | '/api/public/cron/scrape'
   fileRoutesByTo: FileRoutesByTo
@@ -182,6 +192,7 @@ export interface FileRouteTypes {
     | '/resumes'
     | '/settings'
     | '/tracker'
+    | '/jobs/$id'
     | '/api/public/cron/digest'
     | '/api/public/cron/scrape'
   id:
@@ -199,6 +210,7 @@ export interface FileRouteTypes {
     | '/_authenticated/resumes'
     | '/_authenticated/settings'
     | '/_authenticated/tracker'
+    | '/_authenticated/jobs/$id'
     | '/api/public/cron/digest'
     | '/api/public/cron/scrape'
   fileRoutesById: FileRoutesById
@@ -304,6 +316,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAnalyticsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/jobs/$id': {
+      id: '/_authenticated/jobs/$id'
+      path: '/$id'
+      fullPath: '/jobs/$id'
+      preLoaderRoute: typeof AuthenticatedJobsIdRouteImport
+      parentRoute: typeof AuthenticatedJobsRoute
+    }
     '/api/public/cron/scrape': {
       id: '/api/public/cron/scrape'
       path: '/api/public/cron/scrape'
@@ -321,13 +340,24 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedJobsRouteChildren {
+  AuthenticatedJobsIdRoute: typeof AuthenticatedJobsIdRoute
+}
+
+const AuthenticatedJobsRouteChildren: AuthenticatedJobsRouteChildren = {
+  AuthenticatedJobsIdRoute: AuthenticatedJobsIdRoute,
+}
+
+const AuthenticatedJobsRouteWithChildren =
+  AuthenticatedJobsRoute._addFileChildren(AuthenticatedJobsRouteChildren)
+
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
   AuthenticatedAuditLogsRoute: typeof AuthenticatedAuditLogsRoute
   AuthenticatedCompaniesRoute: typeof AuthenticatedCompaniesRoute
   AuthenticatedCoverLettersRoute: typeof AuthenticatedCoverLettersRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
-  AuthenticatedJobsRoute: typeof AuthenticatedJobsRoute
+  AuthenticatedJobsRoute: typeof AuthenticatedJobsRouteWithChildren
   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedResumesRoute: typeof AuthenticatedResumesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
@@ -340,7 +370,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCompaniesRoute: AuthenticatedCompaniesRoute,
   AuthenticatedCoverLettersRoute: AuthenticatedCoverLettersRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
-  AuthenticatedJobsRoute: AuthenticatedJobsRoute,
+  AuthenticatedJobsRoute: AuthenticatedJobsRouteWithChildren,
   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedResumesRoute: AuthenticatedResumesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
