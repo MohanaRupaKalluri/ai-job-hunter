@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, ExternalLink, Loader2, Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import { ArrowLeft, ExternalLink, Loader2, Sparkles, FlaskConical } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getJob } from "@/lib/api/jobs.functions";
+import { getJob, testMatchForJob } from "@/lib/api/jobs.functions";
 
 export const Route = createFileRoute("/_authenticated/jobs/$id")({
   component: JobDetailPage,
@@ -20,10 +21,17 @@ function scoreColor(s: number) {
 
 function JobDetailPage() {
   const { id } = Route.useParams();
+  const qc = useQueryClient();
   const fetchJob = useServerFn(getJob);
+  const testFn = useServerFn(testMatchForJob);
   const { data: job, isLoading } = useQuery({
     queryKey: ["job", id],
     queryFn: () => fetchJob({ data: { id } }),
+  });
+  const testMatch = useMutation({
+    mutationFn: () => testFn({ data: { id } }),
+    onSuccess: (r: any) => { toast.success(`Re-scored: ${Math.round(r.overall_score)} (${r.category})`); qc.invalidateQueries({ queryKey: ["job", id] }); },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   if (isLoading) {
@@ -49,7 +57,12 @@ function JobDetailPage() {
             {(job as any).department ? ` • ${(job as any).department}` : ""}
           </p>
         </div>
-        <Button asChild><a href={(job as any).apply_url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4 mr-2" />Open posting</a></Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" onClick={() => testMatch.mutate()} disabled={testMatch.isPending}>
+            {testMatch.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FlaskConical className="h-4 w-4 mr-2" />}Test match
+          </Button>
+          <Button asChild><a href={(job as any).apply_url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4 mr-2" />Open posting</a></Button>
+        </div>
       </div>
 
       <Card className="p-4 space-y-3">

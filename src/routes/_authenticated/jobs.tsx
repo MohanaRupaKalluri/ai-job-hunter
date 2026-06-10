@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { listJobs, triggerScrapeForMe, importJobManual, clearAllJobs } from "@/lib/api/jobs.functions";
+import { Switch } from "@/components/ui/switch";
 import { generateResumeForJob, generateCoverLetterForJob } from "@/lib/api/documents.functions";
 import { upsertApplication, recordApplyAction } from "@/lib/api/applications.functions";
 
@@ -48,6 +49,8 @@ function JobsPage() {
   const [minScore, setMinScore] = useState("0");
   const [category, setCategory] = useState<"all"|"excellent"|"strong"|"moderate"|"weak">("all");
   const [sortBy, setSortBy] = useState<"score"|"newest">("score");
+  const [softwareOnly, setSoftwareOnly] = useState(true);
+  const [hideRejected, setHideRejected] = useState(true);
   const [confirmJob, setConfirmJob] = useState<{id:string; apply_url:string; title:string}|null>(null);
   const [confirmScrape, setConfirmScrape] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -55,8 +58,8 @@ function JobsPage() {
   const [importForm, setImportForm] = useState({ url: "", title: "", company: "", location: "", description: "" });
 
   const { data: jobs, isLoading } = useQuery({
-    queryKey: ["jobs", search, minScore, category, sortBy],
-    queryFn: () => listFn({ data: { search: search || undefined, minScore: Number(minScore) || undefined, category, sortBy } }),
+    queryKey: ["jobs", search, minScore, category, sortBy, softwareOnly, hideRejected],
+    queryFn: () => listFn({ data: { search: search || undefined, minScore: Number(minScore) || undefined, category, sortBy, softwareOnly, hideRejected } }),
   });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["jobs"] });
   const scrape = useMutation({
@@ -112,7 +115,12 @@ function JobsPage() {
         <Select value={minScore} onValueChange={setMinScore}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="0">Any score</SelectItem><SelectItem value="60">60+</SelectItem><SelectItem value="75">75+ (Strong)</SelectItem><SelectItem value="85">85+ (Excellent)</SelectItem></SelectContent></Select>
         <Select value={category} onValueChange={(v) => setCategory(v as any)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All categories</SelectItem><SelectItem value="excellent">Excellent</SelectItem><SelectItem value="strong">Strong</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="weak">Weak</SelectItem></SelectContent></Select>
         <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="score">Sort by score</SelectItem><SelectItem value="newest">Sort by newest</SelectItem></SelectContent></Select>
-      </div></Card>
+      </div>
+      <div className="flex flex-wrap gap-6 mt-3 text-sm">
+        <label className="flex items-center gap-2 cursor-pointer"><Switch checked={softwareOnly} onCheckedChange={setSoftwareOnly} />Software jobs only</label>
+        <label className="flex items-center gap-2 cursor-pointer"><Switch checked={hideRejected} onCheckedChange={setHideRejected} />Hide rejected roles (interns, sales, etc.)</label>
+      </div>
+      </Card>
       {isLoading ? (<Card className="p-12 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" /></Card>) : !jobs?.length ? (<Card className="p-12 text-center text-muted-foreground"><p className="font-medium">No jobs yet.</p><p className="text-sm mt-1">Add companies and click "Scrape now", or wait for the next 12h run.</p></Card>) : (<div className="grid gap-3">{jobs.map((j: any) => { const score = j.match?.overall_score ?? 0; const canGen = score >= 75; return (
         <Card key={j.id} className="p-4"><div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex-1 min-w-0">
