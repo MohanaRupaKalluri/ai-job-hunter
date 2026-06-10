@@ -4,14 +4,16 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
-import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2 } from "lucide-react";
+import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2, Plus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { listJobs, triggerScrapeForMe } from "@/lib/api/jobs.functions";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { listJobs, triggerScrapeForMe, importJobManual } from "@/lib/api/jobs.functions";
 import { generateResumeForJob, generateCoverLetterForJob } from "@/lib/api/documents.functions";
 import { upsertApplication, recordApplyAction } from "@/lib/api/applications.functions";
 
@@ -35,6 +37,7 @@ function JobsPage() {
   const qc = useQueryClient();
   const listFn = useServerFn(listJobs);
   const scrapeFn = useServerFn(triggerScrapeForMe);
+  const importFn = useServerFn(importJobManual);
   const resumeFn = useServerFn(generateResumeForJob);
   const coverFn = useServerFn(generateCoverLetterForJob);
   const saveFn = useServerFn(upsertApplication);
@@ -45,13 +48,28 @@ function JobsPage() {
   const [category, setCategory] = useState<"all"|"excellent"|"strong"|"moderate"|"weak">("all");
   const [sortBy, setSortBy] = useState<"score"|"newest">("score");
   const [confirmJob, setConfirmJob] = useState<{id:string; apply_url:string; title:string}|null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importForm, setImportForm] = useState({ url: "", title: "", company: "", location: "", description: "" });
 
   const { data: jobs, isLoading } = useQuery({
     queryKey: ["jobs", search, minScore, category, sortBy],
     queryFn: () => listFn({ data: { search: search || undefined, minScore: Number(minScore) || undefined, category, sortBy } }),
   });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["jobs"] });
-  const scrape = useMutation({ mutationFn: () => scrapeFn(), onSuccess: (r: any) => { if (r?.skippedNoFirecrawl) toast.error("Connect Firecrawl in Settings to enable scraping."); else toast.success(`Scraped ${r.scraped} jobs · ${r.newJobs} new · ${r.matched} matched.`); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
+  const scrape = useMutation({
+    mutationFn: () => scrapeFn(),
+    onSuccess: (r: any) => {
+      const srcs = r?.sources ? Object.entries(r.sources).filter(([, n]) => (n as number) > 0).map(([k, n]) => `${k}:${n}`).join(" · ") : "";
+      toast.success(`Scraped ${r.scraped} · ${r.newJobs} new · ${r.matched} matched${srcs ? ` (${srcs})` : ""}`);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const importJob = useMutation({
+    mutationFn: () => importFn({ data: importForm }),
+    onSuccess: () => { toast.success("Job imported."); setImportOpen(false); setImportForm({ url: "", title: "", company: "", location: "", description: "" }); invalidate(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const makeResume = useMutation({ mutationFn: (id: string) => resumeFn({ data: { job_id: id } }), onSuccess: () => { toast.success("Resume generated."); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
   const makeCover = useMutation({ mutationFn: (id: string) => coverFn({ data: { job_id: id } }), onSuccess: () => { toast.success("Cover letter generated."); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
   const addToTracker = useMutation({ mutationFn: (id: string) => saveFn({ data: { job_id: id, status: "found" } }), onSuccess: () => { toast.success("Added to tracker."); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
@@ -75,6 +93,7 @@ function JobsPage() {
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" onClick={() => exportRows("csv")} disabled={!jobs?.length}><Download className="h-4 w-4 mr-2" />CSV</Button>
           <Button variant="outline" onClick={() => exportRows("xlsx")} disabled={!jobs?.length}><Download className="h-4 w-4 mr-2" />XLSX</Button>
+          <Button variant="outline" onClick={() => setImportOpen(true)}><Plus className="h-4 w-4 mr-2" />Import URL</Button>
           <Button onClick={() => scrape.mutate()} disabled={scrape.isPending}>{scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}Scrape now</Button>
         </div>
       </div>
@@ -105,6 +124,27 @@ function JobsPage() {
           <DialogHeader><DialogTitle>Open application page?</DialogTitle><DialogDescription>AI Job Hunter never submits applications for you. We'll open the employer's apply URL in a new tab so you can review and submit it yourself.</DialogDescription></DialogHeader>
           <p className="text-sm bg-muted p-3 rounded font-mono break-all">{confirmJob?.apply_url}</p>
           <DialogFooter><Button variant="ghost" onClick={() => setConfirmJob(null)}>Cancel</Button><Button onClick={confirmApply}>I understand, open page</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import job manually</DialogTitle>
+            <DialogDescription>Paste any job posting URL. Title, company, and description are auto-detected when possible; you can also paste the description for the best AI match score.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div><Label htmlFor="imp-url">Job URL *</Label><Input id="imp-url" placeholder="https://…" value={importForm.url} onChange={(e) => setImportForm({ ...importForm, url: e.target.value })} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label htmlFor="imp-title">Title</Label><Input id="imp-title" value={importForm.title} onChange={(e) => setImportForm({ ...importForm, title: e.target.value })} /></div>
+              <div><Label htmlFor="imp-company">Company</Label><Input id="imp-company" value={importForm.company} onChange={(e) => setImportForm({ ...importForm, company: e.target.value })} /></div>
+            </div>
+            <div><Label htmlFor="imp-loc">Location</Label><Input id="imp-loc" value={importForm.location} onChange={(e) => setImportForm({ ...importForm, location: e.target.value })} /></div>
+            <div><Label htmlFor="imp-desc">Description (paste for best matching)</Label><Textarea id="imp-desc" rows={6} value={importForm.description} onChange={(e) => setImportForm({ ...importForm, description: e.target.value })} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button>
+            <Button onClick={() => importJob.mutate()} disabled={!importForm.url || importJob.isPending}>{importJob.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Import job</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
