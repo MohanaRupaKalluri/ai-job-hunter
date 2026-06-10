@@ -245,13 +245,17 @@ export type Database = {
           company_id: string | null
           company_name: string
           created_at: string
+          department: string | null
           description: string | null
           discovered_at: string
           employment_type: string | null
           external_id: string | null
+          extraction_diagnostics: Json | null
+          extraction_status: string | null
           id: string
           location: string | null
           posted_date: string | null
+          requirements: string | null
           source_url: string | null
           title: string
           user_id: string
@@ -261,13 +265,17 @@ export type Database = {
           company_id?: string | null
           company_name: string
           created_at?: string
+          department?: string | null
           description?: string | null
           discovered_at?: string
           employment_type?: string | null
           external_id?: string | null
+          extraction_diagnostics?: Json | null
+          extraction_status?: string | null
           id?: string
           location?: string | null
           posted_date?: string | null
+          requirements?: string | null
           source_url?: string | null
           title: string
           user_id: string
@@ -277,13 +285,17 @@ export type Database = {
           company_id?: string | null
           company_name?: string
           created_at?: string
+          department?: string | null
           description?: string | null
           discovered_at?: string
           employment_type?: string | null
           external_id?: string | null
+          extraction_diagnostics?: Json | null
+          extraction_status?: string | null
           id?: string
           location?: string | null
           posted_date?: string | null
+          requirements?: string | null
           source_url?: string | null
           title?: string
           user_id?: string
