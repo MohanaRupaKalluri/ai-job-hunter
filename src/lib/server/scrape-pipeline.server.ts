@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import { z } from "zod";
 import { createLovableAi } from "./ai-gateway.server";
 import { discoverJobs, type DiscoveredJob } from "./job-providers.server";
+import { extractJob } from "./job-extractor.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const matchSchema = z.object({
@@ -80,6 +81,8 @@ export type RunReport = {
   skipped: number;
   scored: number;
   companiesChecked: number;
+  extracted: number;
+  extractionFailed: number;
   errors: { company: string; error: string }[];
   companyStatuses?: { company: string; status: "success" | "partial" | "failed" | "timeout"; found: number; saved: number; skipped: number; scored: number; source?: string; error?: string }[];
   sources?: Record<string, number>;
@@ -107,11 +110,12 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 
 export async function runScrapeForUser(
   userId: string,
-  opts: { companyId?: string } = {},
+  opts: { companyId?: string; maxJobs?: number } = {},
 ): Promise<RunReport> {
   const report: RunReport = {
     ok: true, scraped: 0, newJobs: 0, matched: 0, skipped: 0, scored: 0,
-    companiesChecked: 0, errors: [], companyStatuses: [], sources: {},
+    companiesChecked: 0, extracted: 0, extractionFailed: 0,
+    errors: [], companyStatuses: [], sources: {},
   };
 
   const { data: profile } = await supabaseAdmin.from("profiles").select("*").eq("id", userId).maybeSingle();
@@ -121,13 +125,14 @@ export async function runScrapeForUser(
   const { data: companies } = await cq;
 
   let totalSavedThisRun = 0;
+  const runCap = Math.min(opts.maxJobs ?? MAX_JOBS_PER_RUN, MAX_JOBS_PER_RUN);
 
   for (const c of companies ?? []) {
     let errorMsg: string | null = null;
     let source = "generic";
     const cStat = { company: c.name, status: "success" as "success"|"partial"|"failed"|"timeout", found: 0, saved: 0, skipped: 0, scored: 0, source: undefined as string | undefined, error: undefined as string | undefined };
     report.companiesChecked += 1;
-    if (totalSavedThisRun >= MAX_JOBS_PER_RUN) {
+    if (totalSavedThisRun >= runCap) {
       cStat.status = "partial";
       cStat.error = "run cap reached; queued for next run";
       report.companyStatuses!.push(cStat);
@@ -143,19 +148,59 @@ export async function runScrapeForUser(
       cStat.found = allJobs.length;
       report.scraped += allJobs.length;
 
-      // Role filter BEFORE saving / AI scoring.
-      const relevant = allJobs.filter(matchesRoleFilter);
-      const skippedHere = allJobs.length - relevant.length;
-      cStat.skipped += skippedHere;
-      report.skipped += skippedHere;
+      // For provider feeds we can pre-filter by description; for generic
+      // results description is empty so filter only after extraction below.
+      const providerHadDescription = source !== "generic" && source !== "firecrawl";
+      const preFiltered = providerHadDescription ? allJobs.filter(matchesRoleFilter) : allJobs;
+      const preSkipped = providerHadDescription ? allJobs.length - preFiltered.length : 0;
+      cStat.skipped += preSkipped;
+      report.skipped += preSkipped;
 
       // Per-company batch cap + global run cap.
-      const remainingRun = MAX_JOBS_PER_RUN - totalSavedThisRun;
-      const batch = relevant.slice(0, Math.min(MAX_JOBS_PER_COMPANY, remainingRun));
-      const queuedForNext = relevant.length - batch.length;
+      const remainingRun = runCap - totalSavedThisRun;
+      const batch = preFiltered.slice(0, Math.min(MAX_JOBS_PER_COMPANY, remainingRun));
+      const queuedForNext = preFiltered.length - batch.length;
       if (queuedForNext > 0) cStat.status = "partial";
 
       for (const j of batch) {
+        // 1. Extract the detail page (skip the network round trip if the
+        //    provider already gave us a real description).
+        let extracted: Awaited<ReturnType<typeof extractJob>> | null = null;
+        if (!providerHadDescription || !j.description) {
+          try {
+            extracted = await withTimeout(extractJob(j.apply_url, j.title), 20000, `Extract ${j.title}`);
+          } catch {
+            extracted = null;
+          }
+        }
+        const finalTitle = extracted?.title || j.title;
+        const finalLocation = extracted?.location ?? j.location ?? null;
+        const finalDepartment = extracted?.department ?? null;
+        const finalDescription = extracted?.description ?? j.description ?? null;
+        const finalRequirements = extracted?.requirements ?? null;
+        const extractionOk = providerHadDescription ? !!j.description : !!extracted?.diagnostics.success;
+        const extractionDiag = extracted?.diagnostics ?? {
+          success: !!j.description,
+          source_url: j.apply_url,
+          description_length: (j.description ?? "").length,
+          requirements_found: false,
+          qualifications_found: false,
+          used_json_ld: false,
+          provider_supplied: providerHadDescription,
+        };
+        if (extractionOk) report.extracted += 1; else report.extractionFailed += 1;
+
+        // For generic sources, apply the role filter AFTER extraction so we
+        // can read the real description text.
+        if (!providerHadDescription) {
+          const passes = matchesRoleFilter({ title: finalTitle, description: finalDescription });
+          if (!passes) {
+            report.skipped += 1;
+            cStat.skipped += 1;
+            continue;
+          }
+        }
+
         const { data: inserted, error: insErr } = await supabaseAdmin
           .from("jobs")
           .upsert(
@@ -163,25 +208,29 @@ export async function runScrapeForUser(
               user_id: userId,
               company_id: c.id,
               company_name: c.name,
-              title: j.title,
-              location: j.location ?? null,
+              title: finalTitle,
+              location: finalLocation,
               employment_type: j.employment_type ?? null,
               posted_date: j.posted_date ?? null,
               apply_url: j.apply_url,
               source_url: c.careers_url,
               external_id: j.external_id ?? null,
-              description: j.description ?? null,
+              description: finalDescription,
+              department: finalDepartment,
+              requirements: finalRequirements,
+              extraction_status: extractionOk ? "ok" : "failed",
+              extraction_diagnostics: extractionDiag as any,
             },
             { onConflict: "user_id,apply_url", ignoreDuplicates: true },
           )
-          .select("id, title, company_name, location, employment_type, description")
+          .select("id, title, company_name, location, employment_type, description, requirements")
           .maybeSingle();
         if (insErr) continue;
         if (!inserted) continue;
         report.newJobs += 1;
         cStat.saved += 1;
         totalSavedThisRun += 1;
-        if (profile) {
+        if (profile && extractionOk) {
           try {
             const score = await scoreJobAgainstProfile(profile, inserted);
             await supabaseAdmin.from("job_matches").upsert(
@@ -207,7 +256,7 @@ export async function runScrapeForUser(
             // continue on AI scoring errors
           }
         }
-        if (totalSavedThisRun >= MAX_JOBS_PER_RUN) break;
+        if (totalSavedThisRun >= runCap) break;
       }
     } catch (e) {
       errorMsg = (e as Error).message;
