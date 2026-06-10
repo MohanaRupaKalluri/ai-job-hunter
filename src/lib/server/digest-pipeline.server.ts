@@ -23,8 +23,8 @@ async function sendEmail(to: string, subject: string, html: string) {
 
 export async function sendDailyDigests() {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: profiles } = await supabaseAdmin
-    .from("profiles")
+  const { data: profiles } = await (supabaseAdmin
+    .from("profiles") as any)
     .select("id, email, full_name, daily_digest_enabled")
     .eq("daily_digest_enabled", true);
 
