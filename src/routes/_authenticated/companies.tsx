@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery, queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { listCompanies, createCompany, updateCompany, deleteCompany, bulkImportCompanies, discoveryTest } from "@/lib/api/companies.functions";
+import { listCompanies, createCompany, updateCompany, deleteCompany, bulkImportCompanies, discoveryTest, extractionTest } from "@/lib/api/companies.functions";
 import { triggerScrapeForMe } from "@/lib/api/jobs.functions";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { useState, useRef } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Upload, RefreshCw, Loader2, Search } from "lucide-react";
+import { Plus, Trash2, Upload, RefreshCw, Loader2, Search, FlaskConical } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/companies")({ component: CompaniesPage });
 
@@ -24,6 +24,7 @@ function CompaniesPage() {
   const bulkFn = useServerFn(bulkImportCompanies);
   const scrapeFn = useServerFn(triggerScrapeForMe);
   const discoverFn = useServerFn(discoveryTest);
+  const extractFn = useServerFn(extractionTest);
   const qc = useQueryClient();
   const { data: companies } = useSuspenseQuery(queryOptions({ queryKey: ["companies"], queryFn: () => listFn() }));
 
@@ -67,6 +68,13 @@ function CompaniesPage() {
   const discover = useMutation({
     mutationFn: (id: string) => discoverFn({ data: { id } }),
     onSuccess: (r: any) => setDiscResult(r),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const [extractResult, setExtractResult] = useState<any | null>(null);
+  const extractTest = useMutation({
+    mutationFn: (id: string) => extractFn({ data: { id, limit: 5 } }),
+    onSuccess: (r: any) => setExtractResult(r),
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -146,6 +154,9 @@ function CompaniesPage() {
                       <Button size="icon" variant="ghost" title="Discovery test (no save)" disabled={discover.isPending} onClick={() => discover.mutate(c.id)}>
                         {discover.isPending && discover.variables === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                       </Button>
+                      <Button size="icon" variant="ghost" title="Extraction test (first 5, no save)" disabled={extractTest.isPending} onClick={() => extractTest.mutate(c.id)}>
+                        {extractTest.isPending && extractTest.variables === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
+                      </Button>
                       <Button size="icon" variant="ghost" title="Scrape this company" disabled={scrapeOne.isPending} onClick={() => scrapeOne.mutate(c.id)}>
                         {scrapeOne.isPending && scrapeOne.variables === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       </Button>
@@ -205,6 +216,59 @@ function CompaniesPage() {
             </div>
           )}
           <DialogFooter><Button variant="ghost" onClick={() => setDiscResult(null)}>Close</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!extractResult} onOpenChange={(o) => !o && setExtractResult(null)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Extraction test · {extractResult?.company}</DialogTitle>
+          </DialogHeader>
+          {extractResult && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <Stat label="Discovered" value={extractResult.discovered} />
+                <Stat label="Tested" value={extractResult.tested} />
+                <Stat label="Succeeded" value={extractResult.successes} />
+                <Stat label="Source" value={extractResult.source} />
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Nothing was saved or scored. Use this to verify quality before running a full scrape.
+              </p>
+              <div className="space-y-3">
+                {extractResult.results.map((r: any, i: number) => (
+                  <div key={i} className="rounded border p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{r.title || r.discovered_title}</div>
+                        <a href={r.apply_url} target="_blank" rel="noreferrer" className="text-xs text-primary underline break-all">{r.apply_url}</a>
+                      </div>
+                      <div className="flex gap-1 flex-wrap">
+                        {r.diagnostics ? <span className={`text-xs px-2 py-0.5 rounded border ${r.diagnostics.success ? "border-emerald-500/40 text-emerald-300" : "border-amber-500/40 text-amber-300"}`}>{r.diagnostics.success ? "ok" : "weak"}</span> : null}
+                        {r.diagnostics?.used_json_ld ? <span className="text-xs px-2 py-0.5 rounded border">JSON-LD</span> : null}
+                        {r.diagnostics ? <span className="text-xs px-2 py-0.5 rounded border">{r.diagnostics.description_length} chars</span> : null}
+                      </div>
+                    </div>
+                    {r.location || r.department ? (
+                      <p className="text-xs text-muted-foreground">{[r.location, r.department].filter(Boolean).join(" • ")}</p>
+                    ) : null}
+                    {r.description_excerpt ? (
+                      <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-6">{r.description_excerpt}</p>
+                    ) : r.error ? (
+                      <p className="text-xs text-destructive">{r.error}</p>
+                    ) : null}
+                    {r.requirements_excerpt ? (
+                      <div>
+                        <p className="text-xs uppercase text-muted-foreground">Requirements</p>
+                        <p className="text-xs whitespace-pre-wrap line-clamp-4">{r.requirements_excerpt}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <DialogFooter><Button variant="ghost" onClick={() => setExtractResult(null)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
