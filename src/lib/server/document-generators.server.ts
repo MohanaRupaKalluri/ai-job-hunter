@@ -101,16 +101,40 @@ export async function textToPdf(title: string, body: string): Promise<Uint8Array
 
 // ATS-friendly compact resume PDF. Renders the structured ResumeDoc directly
 // instead of going through plain text → that lets us control spacing, keep
-// the education block together, and keep most resumes on one page.
+// the education block together, and keep most resumes on one page. When the
+// first pass overflows, we automatically retry with tighter typography so
+// resumes don't bleed onto a nearly-empty second page.
 export async function resumeToPdf(r: ResumeDoc): Promise<Uint8Array> {
+  const passes = [
+    { margin: 40, fontSize: 10, lineHeight: 12, sectionGap: 6, headerSize: 18, sectionSize: 11 },
+    { margin: 36, fontSize: 9.5, lineHeight: 11, sectionGap: 5, headerSize: 16, sectionSize: 10.5 },
+    { margin: 32, fontSize: 9, lineHeight: 10.5, sectionGap: 4, headerSize: 15, sectionSize: 10 },
+  ];
+  let last: { bytes: Uint8Array; pages: number } | null = null;
+  for (const pass of passes) {
+    const out = await renderResumePdf(r, pass);
+    last = out;
+    if (out.pages <= 1) return out.bytes;
+  }
+  return last!.bytes;
+}
+
+type RenderOpts = {
+  margin: number;
+  fontSize: number;
+  lineHeight: number;
+  sectionGap: number;
+  headerSize: number;
+  sectionSize: number;
+};
+
+async function renderResumePdf(r: ResumeDoc, opts: RenderOpts): Promise<{ bytes: Uint8Array; pages: number }> {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const margin = 40;
+  const { margin, lineHeight, sectionGap, fontSize, headerSize, sectionSize } = opts;
   const width = 612;
   const height = 792;
-  const lineHeight = 12;
-  const sectionGap = 6;
   const maxWidth = width - margin * 2;
   let page = pdf.addPage([width, height]);
   let y = height - margin;
@@ -122,7 +146,7 @@ export async function resumeToPdf(r: ResumeDoc): Promise<Uint8Array> {
   const ensure = (needed: number) => {
     if (y - needed < margin) newPage();
   };
-  const wrap = (text: string, f = font, size = 10): string[] => {
+  const wrap = (text: string, f = font, size = fontSize): string[] => {
     const words = (text ?? "").split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let line = "";
@@ -136,18 +160,18 @@ export async function resumeToPdf(r: ResumeDoc): Promise<Uint8Array> {
     if (line) lines.push(line);
     return lines;
   };
-  const draw = (text: string, f = font, size = 10) => {
+  const draw = (text: string, f = font, size = fontSize) => {
     ensure(lineHeight);
     page.drawText(text, { x: margin, y: y - size, size, font: f, color: rgb(0.1, 0.1, 0.12) });
     y -= lineHeight;
   };
-  const para = (text: string, f = font, size = 10) => {
+  const para = (text: string, f = font, size = fontSize) => {
     for (const ln of wrap(text, f, size)) draw(ln, f, size);
   };
   const heading = (text: string) => {
     ensure(lineHeight + sectionGap);
     y -= 2;
-    page.drawText(text.toUpperCase(), { x: margin, y: y - 11, size: 11, font: bold, color: rgb(0.1, 0.1, 0.12) });
+    page.drawText(text.toUpperCase(), { x: margin, y: y - sectionSize, size: sectionSize, font: bold, color: rgb(0.1, 0.1, 0.12) });
     y -= lineHeight + 1;
     page.drawLine({
       start: { x: margin, y: y + 4 },
@@ -159,15 +183,16 @@ export async function resumeToPdf(r: ResumeDoc): Promise<Uint8Array> {
   };
 
   // Header
-  ensure(28);
-  page.drawText(r.name || "", { x: margin, y: y - 18, size: 18, font: bold, color: rgb(0.1, 0.1, 0.12) });
-  y -= 22;
+  ensure(headerSize + 10);
+  page.drawText(r.name || "", { x: margin, y: y - headerSize, size: headerSize, font: bold, color: rgb(0.1, 0.1, 0.12) });
+  y -= headerSize + 4;
   const contactLine = [r.contact.email, r.contact.phone, r.contact.location, ...(r.contact.links ?? [])]
     .filter(Boolean)
     .join("  •  ");
   if (contactLine) {
-    page.drawText(contactLine, { x: margin, y: y - 10, size: 9, font, color: rgb(0.35, 0.35, 0.4) });
-    y -= 14;
+    const cSize = Math.max(8, fontSize - 1);
+    page.drawText(contactLine, { x: margin, y: y - cSize, size: cSize, font, color: rgb(0.35, 0.35, 0.4) });
+    y -= cSize + 5;
   }
 
   if (r.summary?.trim()) {
@@ -182,26 +207,26 @@ export async function resumeToPdf(r: ResumeDoc): Promise<Uint8Array> {
     heading("Experience");
     for (const e of r.experience) {
       ensure(lineHeight * 2 + e.bullets.length * lineHeight);
-      draw(`${e.title} — ${e.company}`, bold, 10);
-      draw(e.period, font, 9);
+      draw(`${e.title} — ${e.company}`, bold, fontSize);
+      draw(e.period, font, Math.max(8, fontSize - 1));
       for (const b of e.bullets) para(`• ${b}`);
       y -= 2;
     }
   }
   if (r.education?.length) {
-    // Keep all education entries on the same page — start a new page if they
-    // would otherwise be split across pages.
+    // Keep education entries on the same page when possible.
     const eduHeight = lineHeight + sectionGap + r.education.length * (lineHeight * 2 + 2);
     if (y - eduHeight < margin) newPage();
     heading("Education");
     for (const ed of r.education) {
-      draw(`${ed.degree}, ${ed.school}`, bold, 10);
-      draw(ed.period, font, 9);
+      draw(`${ed.degree}, ${ed.school}`, bold, fontSize);
+      draw(ed.period, font, Math.max(8, fontSize - 1));
       y -= 2;
     }
   }
 
-  return await pdf.save();
+  const bytes = await pdf.save();
+  return { bytes, pages: pdf.getPageCount() };
 }
 
 export function resumeToPlainText(r: ResumeDoc): string {
