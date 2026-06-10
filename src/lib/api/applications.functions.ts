@@ -17,12 +17,31 @@ export const listApplications = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("applications")
-      .select(
-        "*, jobs(id, title, company_name, location, apply_url), resume_doc:generated_documents!applications_resume_document_id_fkey(id, storage_path, format), cover_doc:generated_documents!applications_cover_letter_document_id_fkey(id, storage_path, format)",
-      )
+      .select("*, jobs(id, title, company_name, location, apply_url)")
       .order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return data ?? [];
+    const apps = data ?? [];
+    // Manually attach resume / cover letter docs (no FK relationship in schema).
+    const docIds = Array.from(
+      new Set(
+        apps
+          .flatMap((a: any) => [a.resume_document_id, a.cover_letter_document_id])
+          .filter(Boolean) as string[],
+      ),
+    );
+    let docMap = new Map<string, any>();
+    if (docIds.length) {
+      const { data: docs } = await context.supabase
+        .from("generated_documents")
+        .select("id, storage_path, format, kind")
+        .in("id", docIds);
+      docMap = new Map((docs ?? []).map((d: any) => [d.id, d]));
+    }
+    return apps.map((a: any) => ({
+      ...a,
+      resume_doc: a.resume_document_id ? docMap.get(a.resume_document_id) ?? null : null,
+      cover_doc: a.cover_letter_document_id ? docMap.get(a.cover_letter_document_id) ?? null : null,
+    }));
   });
 
 export const upsertApplication = createServerFn({ method: "POST" })
