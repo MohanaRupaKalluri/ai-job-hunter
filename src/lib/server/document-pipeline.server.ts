@@ -5,7 +5,6 @@ import { createLovableAi } from "./ai-gateway.server";
 import {
   type ResumeDoc,
   resumeToDocx,
-  resumeToPlainText,
   textToPdf,
   resumeToPdf,
 } from "./document-generators.server";
