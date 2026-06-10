@@ -60,10 +60,27 @@ export const getJob = createServerFn({ method: "POST" })
 
 export const triggerScrapeForMe = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((input: unknown) =>
+    z.object({ companyId: z.string().uuid().optional() }).parse(input ?? {}),
+  )
+  .handler(async ({ data, context }) => {
     const { runScrapeForUser } = await import("@/lib/server/scrape-pipeline.server");
-    const report = await runScrapeForUser(context.userId);
+    const report = await runScrapeForUser(context.userId, { companyId: data.companyId });
     return report;
+  });
+
+export const clearAllJobs = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { error: mErr } = await context.supabase.from("job_matches").delete().eq("user_id", context.userId);
+    if (mErr) throw new Error(mErr.message);
+    const { error } = await context.supabase.from("jobs").delete().eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    await context.supabase.from("action_logs").insert({
+      user_id: context.userId,
+      action: "jobs.cleared",
+    });
+    return { ok: true };
   });
 
 export const importJobManual = createServerFn({ method: "POST" })
