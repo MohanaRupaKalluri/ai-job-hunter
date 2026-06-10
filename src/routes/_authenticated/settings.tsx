@@ -20,7 +20,7 @@ function SettingsPage() {
   const updateFn = useServerFn(upsertMyProfile);
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const scrape = useMutation({ mutationFn: () => scrapeFn(), onSuccess: (r: any) => { if (r?.skippedNoFirecrawl) toast.error("Firecrawl is not connected."); else toast.success(`Scraped ${r.scraped} · ${r.newJobs} new · ${r.matched} matched`); }, onError: (e: Error) => toast.error(e.message) });
+  const scrape = useMutation({ mutationFn: () => scrapeFn(), onSuccess: (r: any) => toast.success(`Scraped ${r.scraped} · ${r.newJobs} new · ${r.matched} matched`), onError: (e: Error) => toast.error(e.message) });
   const { data: profile } = useQuery({ queryKey: ["profile"], queryFn: () => profileFn() });
   const digestEnabled = (profile as any)?.daily_digest_enabled ?? true;
   const toggleDigest = useMutation({
@@ -36,16 +36,18 @@ function SettingsPage() {
       <div><h1 className="text-2xl font-semibold">Settings</h1><p className="text-muted-foreground text-sm">Integrations, automations, and account</p></div>
 
       <Card className="p-5 space-y-3">
-        <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Search className="h-4 w-4 text-primary" /><h3 className="font-semibold">Job scraping (Firecrawl)</h3></div><Badge variant="outline">Connect required</Badge></div>
-        <p className="text-sm text-muted-foreground">Scraping runs automatically every 12 hours. Without Firecrawl connected, the scheduler logs a "skipped" entry and no new jobs appear.</p>
+        <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Search className="h-4 w-4 text-primary" /><h3 className="font-semibold">Job discovery</h3></div><Badge variant="outline" className="border-emerald-500/40 text-emerald-300">Built-in · No key needed</Badge></div>
+        <p className="text-sm text-muted-foreground">Discovery runs every 12 hours and is also available on demand. It auto-detects the best provider per company URL:</p>
+        <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+          <li><span className="text-foreground">Greenhouse</span> — public Job Board API (e.g. <code className="text-xs">boards.greenhouse.io/acme</code>)</li>
+          <li><span className="text-foreground">Lever</span> — public Postings API (e.g. <code className="text-xs">jobs.lever.co/acme</code>)</li>
+          <li><span className="text-foreground">Workable</span> — public job feed (e.g. <code className="text-xs">apply.workable.com/acme</code>)</li>
+          <li><span className="text-foreground">Generic HTML</span> — fetch + link extraction for everything else</li>
+          <li><span className="text-foreground">Manual import</span> — paste any job URL from the Jobs page</li>
+        </ul>
         <div className="text-sm bg-muted/40 border rounded-md p-3 space-y-1">
-          <p className="font-medium">How to connect</p>
-          <ol className="list-decimal list-inside text-muted-foreground space-y-0.5">
-            <li>Open the <span className="font-medium text-foreground">Connectors</span> panel in the Lovable sidebar.</li>
-            <li>Search for <span className="font-medium text-foreground">Firecrawl</span> and click Connect.</li>
-            <li>Sign in with your Firecrawl account (free tier works) and authorize this project.</li>
-            <li>Return here and click <span className="font-medium text-foreground">Run scrape now</span> to verify.</li>
-          </ol>
+          <p className="font-medium">Firecrawl (optional)</p>
+          <p className="text-muted-foreground">Only needed for JavaScript-heavy career pages that don't render meaningful HTML on first fetch. The app works without it. To enable: open the <span className="text-foreground">Connectors</span> panel, find <span className="text-foreground">Firecrawl</span>, and authorize. The pipeline will use it automatically when generic fetch returns nothing.</p>
         </div>
         <Button onClick={() => scrape.mutate()} disabled={scrape.isPending} variant="outline">{scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}Run scrape now</Button>
       </Card>

@@ -65,3 +65,28 @@ export const triggerScrapeForMe = createServerFn({ method: "POST" })
     const report = await runScrapeForUser(context.userId);
     return report;
   });
+
+export const importJobManual = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        url: z.string().trim().url(),
+        title: z.string().trim().max(300).optional().or(z.literal("")),
+        company: z.string().trim().max(200).optional().or(z.literal("")),
+        location: z.string().trim().max(200).optional().or(z.literal("")),
+        description: z.string().trim().max(20000).optional().or(z.literal("")),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { importJobByUrl } = await import("@/lib/server/scrape-pipeline.server");
+    const job = await importJobByUrl(context.userId, {
+      url: data.url,
+      title: data.title || null,
+      company: data.company || null,
+      location: data.location || null,
+      description: data.description || null,
+    });
+    return job;
+  });

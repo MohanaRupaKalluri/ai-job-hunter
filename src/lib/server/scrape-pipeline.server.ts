@@ -1,23 +1,8 @@
 import { generateText } from "ai";
 import { z } from "zod";
-import { scrapeCareerPage, hasFirecrawl } from "./firecrawl.server";
 import { createLovableAi } from "./ai-gateway.server";
+import { discoverJobs, type DiscoveredJob } from "./job-providers.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-
-const jobsSchema = z.object({
-  jobs: z
-    .array(
-      z.object({
-        title: z.string(),
-        location: z.string().nullable().optional(),
-        employment_type: z.string().nullable().optional(),
-        posted_date: z.string().nullable().optional(),
-        apply_url: z.string(),
-        description: z.string().nullable().optional(),
-      }),
-    )
-    .default([]),
-});
 
 const matchSchema = z.object({
   skill_score: z.number().min(0).max(100),
@@ -43,40 +28,6 @@ function categorize(score: number): "excellent" | "strong" | "moderate" | "weak"
   if (score >= 75) return "strong";
   if (score >= 60) return "moderate";
   return "weak";
-}
-
-function absoluteUrl(href: string, base: string): string {
-  try {
-    return new URL(href, base).toString();
-  } catch {
-    return href;
-  }
-}
-
-export async function extractJobsFromPage(careersUrl: string) {
-  const { markdown, links } = await scrapeCareerPage(careersUrl);
-  const linkSample = links.slice(0, 60).join("\n");
-  const model = createLovableAi();
-  const { text } = await generateText({
-    model,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You extract job listings from career page content. Return ONLY a JSON object {\"jobs\": [{title, location?, employment_type?, posted_date? (YYYY-MM-DD), apply_url, description?}]}. apply_url MUST be one of the links provided, choose the most likely apply URL for each role. Do not invent jobs; only extract what is clearly listed.",
-      },
-      {
-        role: "user",
-        content: `Source URL: ${careersUrl}\n\nPAGE CONTENT (markdown, truncated):\n${markdown}\n\nLINKS ON PAGE:\n${linkSample}`,
-      },
-    ],
-  });
-  const parsed = jobsSchema.parse(extractJson(text));
-  return parsed.jobs.map((j) => ({
-    ...j,
-    apply_url: absoluteUrl(j.apply_url, careersUrl),
-    posted_date: j.posted_date && /^\d{4}-\d{2}-\d{2}$/.test(j.posted_date) ? j.posted_date : null,
-  }));
 }
 
 export async function scoreJobAgainstProfile(profile: any, job: any) {
@@ -121,12 +72,11 @@ export type RunReport = {
   newJobs: number;
   matched: number;
   errors: { company: string; error: string }[];
-  skippedNoFirecrawl?: boolean;
+  sources?: Record<string, number>;
 };
 
 export async function runScrapeForUser(userId: string): Promise<RunReport> {
-  const report: RunReport = { ok: true, scraped: 0, newJobs: 0, matched: 0, errors: [] };
-  if (!hasFirecrawl()) return { ...report, ok: false, skippedNoFirecrawl: true };
+  const report: RunReport = { ok: true, scraped: 0, newJobs: 0, matched: 0, errors: [], sources: {} };
 
   const { data: profile } = await supabaseAdmin.from("profiles").select("*").eq("id", userId).maybeSingle();
   const { data: companies } = await supabaseAdmin
@@ -138,10 +88,14 @@ export async function runScrapeForUser(userId: string): Promise<RunReport> {
   for (const c of companies ?? []) {
     let status = "ok";
     let errorMsg: string | null = null;
+    let source = "generic";
     try {
-      const jobs = await extractJobsFromPage(c.careers_url);
+      const result = await discoverJobs(c.careers_url);
+      source = result.source;
+      report.sources![source] = (report.sources![source] ?? 0) + result.jobs.length;
+      const jobs = result.jobs;
       report.scraped += jobs.length;
-      for (const j of jobs) {
+      for (const j of jobs as DiscoveredJob[]) {
         const { data: inserted, error: insErr } = await supabaseAdmin
           .from("jobs")
           .upsert(
@@ -152,9 +106,10 @@ export async function runScrapeForUser(userId: string): Promise<RunReport> {
               title: j.title,
               location: j.location ?? null,
               employment_type: j.employment_type ?? null,
-              posted_date: j.posted_date,
+              posted_date: j.posted_date ?? null,
               apply_url: j.apply_url,
               source_url: c.careers_url,
+              external_id: j.external_id ?? null,
               description: j.description ?? null,
             },
             { onConflict: "user_id,apply_url", ignoreDuplicates: true },
@@ -196,7 +151,7 @@ export async function runScrapeForUser(userId: string): Promise<RunReport> {
     }
     await supabaseAdmin
       .from("companies")
-      .update({ last_scraped_at: new Date().toISOString(), last_scrape_status: errorMsg ? `error: ${errorMsg.slice(0, 200)}` : status })
+      .update({ last_scraped_at: new Date().toISOString(), last_scrape_status: errorMsg ? `error: ${errorMsg.slice(0, 200)}` : `${status} (${source})` })
       .eq("id", c.id);
   }
 
@@ -207,6 +162,99 @@ export async function runScrapeForUser(userId: string): Promise<RunReport> {
   });
 
   return report;
+}
+
+export async function importJobByUrl(
+  userId: string,
+  input: { url: string; title?: string | null; company?: string | null; description?: string | null; location?: string | null },
+) {
+  let title = input.title?.trim() || null;
+  let company = input.company?.trim() || null;
+  let description = input.description?.trim() || null;
+  let location = input.location?.trim() || null;
+
+  // Try to enrich missing fields from a quick HTML fetch (free).
+  if (!title || !company || !description) {
+    try {
+      const res = await fetch(input.url, {
+        headers: { "user-agent": "Mozilla/5.0 (compatible; AIJobHunterBot/1.0)" },
+      });
+      if (res.ok) {
+        const html = await res.text();
+        if (!title) {
+          const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i);
+          const t = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+          title = (og?.[1] ?? t?.[1] ?? "").trim() || null;
+        }
+        if (!company) {
+          const og = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)/i);
+          company = (og?.[1] ?? new URL(input.url).hostname.replace(/^www\./, "")).trim() || null;
+        }
+        if (!description) {
+          const og = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)/i);
+          const md = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)/i);
+          description = (og?.[1] ?? md?.[1] ?? "").trim() || null;
+        }
+      }
+    } catch {
+      /* ignore enrichment failures */
+    }
+  }
+  if (!title) title = "Imported job";
+  if (!company) company = new URL(input.url).hostname.replace(/^www\./, "");
+
+  const { data: inserted, error } = await supabaseAdmin
+    .from("jobs")
+    .upsert(
+      {
+        user_id: userId,
+        company_name: company,
+        title,
+        location,
+        apply_url: input.url,
+        source_url: input.url,
+        description,
+      },
+      { onConflict: "user_id,apply_url", ignoreDuplicates: false },
+    )
+    .select("id, title, company_name, location, employment_type, description")
+    .single();
+  if (error) throw new Error(error.message);
+
+  if (inserted) {
+    const { data: profile } = await supabaseAdmin.from("profiles").select("*").eq("id", userId).maybeSingle();
+    if (profile) {
+      try {
+        const score = await scoreJobAgainstProfile(profile, inserted);
+        await supabaseAdmin.from("job_matches").upsert(
+          {
+            user_id: userId,
+            job_id: inserted.id,
+            skill_score: score.skill_score,
+            experience_score: score.experience_score,
+            location_score: score.location_score,
+            resume_score: score.resume_score,
+            overall_score: score.overall_score,
+            category: score.category,
+            rationale: score.rationale,
+            matched_skills: score.matched_skills,
+            missing_skills: score.missing_skills,
+          },
+          { onConflict: "user_id,job_id" },
+        );
+      } catch {
+        /* ignore scoring errors */
+      }
+    }
+    await supabaseAdmin.from("action_logs").insert({
+      user_id: userId,
+      action: "job.imported_manual",
+      target_type: "job",
+      target_id: inserted.id,
+      metadata: { apply_url: input.url },
+    });
+  }
+  return inserted;
 }
 
 export async function runScrapeAllUsers(): Promise<{ users: number; totalNewJobs: number }> {
