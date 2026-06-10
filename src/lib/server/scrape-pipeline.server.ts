@@ -138,6 +138,7 @@ export async function runScrapeForUser(
       source = result.source;
       cStat.source = source;
       report.sources![source] = (report.sources![source] ?? 0) + result.jobs.length;
+      if (result.diagnostics) (cStat as any).diagnostics = result.diagnostics;
       const allJobs = result.jobs as DiscoveredJob[];
       cStat.found = allJobs.length;
       report.scraped += allJobs.length;
