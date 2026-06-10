@@ -1,10 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
-import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2, Plus, Trash2, AlertTriangle, Info } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -123,6 +123,7 @@ function JobsPage() {
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button variant="outline" size="sm" onClick={() => addToTracker.mutate(j.id)}><Bookmark className="h-4 w-4 mr-1" />Track</Button>
+            <Button variant="outline" size="sm" asChild><Link to="/jobs/$id" params={{ id: j.id }}><Info className="h-4 w-4 mr-1" />Details</Link></Button>
             <Button variant="outline" size="sm" disabled={!canGen || makeResume.isPending} onClick={() => makeResume.mutate(j.id)} title={canGen ? "Generate ATS resume" : "Available for 75+ matches"}>{makeResume.isPending && makeResume.variables === j.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileText className="h-4 w-4 mr-1" />}Resume</Button>
             <Button variant="outline" size="sm" disabled={makeCover.isPending} onClick={() => makeCover.mutate(j.id)}>{makeCover.isPending && makeCover.variables === j.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Mail className="h-4 w-4 mr-1" />}Cover</Button>
             <Button size="sm" onClick={() => setConfirmJob({ id: j.id, apply_url: j.apply_url, title: j.title })}><ExternalLink className="h-4 w-4 mr-1" />Apply</Button>

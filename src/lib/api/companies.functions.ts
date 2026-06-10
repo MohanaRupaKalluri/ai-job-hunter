@@ -85,3 +85,60 @@ export const discoveryTest = createServerFn({ method: "POST" })
       total: r.jobs.length,
     };
   });
+
+export const extractionTest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ id: z.string().uuid(), limit: z.number().int().min(1).max(10).default(5) }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: company, error } = await context.supabase
+      .from("companies")
+      .select("id, name, careers_url")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!company) throw new Error("Company not found");
+
+    const { discoveryReport } = await import("@/lib/server/job-providers.server");
+    const { extractJob } = await import("@/lib/server/job-extractor.server");
+    const r = await discoveryReport(company.careers_url);
+    const sample = r.jobs.slice(0, data.limit);
+
+    const results = [] as any[];
+    for (const j of sample) {
+      try {
+        const ex = await extractJob(j.apply_url, j.title);
+        results.push({
+          discovered_title: j.title,
+          apply_url: j.apply_url,
+          title: ex.title,
+          location: ex.location,
+          department: ex.department,
+          description_excerpt: (ex.description ?? "").slice(0, 800),
+          requirements_excerpt: (ex.requirements ?? "").slice(0, 600),
+          qualifications_excerpt: (ex.qualifications ?? "").slice(0, 600),
+          diagnostics: ex.diagnostics,
+        });
+      } catch (e) {
+        results.push({ discovered_title: j.title, apply_url: j.apply_url, error: (e as Error).message });
+      }
+    }
+
+    await context.supabase.from("action_logs").insert({
+      user_id: context.userId,
+      action: "extraction.test",
+      target_type: "company",
+      target_id: company.id,
+      metadata: { tested: results.length, successes: results.filter((x) => x.diagnostics?.success).length } as any,
+    });
+
+    return {
+      company: company.name,
+      source: r.source,
+      discovered: r.jobs.length,
+      tested: results.length,
+      successes: results.filter((x: any) => x.diagnostics?.success).length,
+      results,
+    };
+  });
