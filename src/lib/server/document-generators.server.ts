@@ -99,6 +99,111 @@ export async function textToPdf(title: string, body: string): Promise<Uint8Array
   return await pdf.save();
 }
 
+// ATS-friendly compact resume PDF. Renders the structured ResumeDoc directly
+// instead of going through plain text → that lets us control spacing, keep
+// the education block together, and keep most resumes on one page.
+export async function resumeToPdf(r: ResumeDoc): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const margin = 40;
+  const width = 612;
+  const height = 792;
+  const lineHeight = 12;
+  const sectionGap = 6;
+  const maxWidth = width - margin * 2;
+  let page = pdf.addPage([width, height]);
+  let y = height - margin;
+
+  const newPage = () => {
+    page = pdf.addPage([width, height]);
+    y = height - margin;
+  };
+  const ensure = (needed: number) => {
+    if (y - needed < margin) newPage();
+  };
+  const wrap = (text: string, f = font, size = 10): string[] => {
+    const words = (text ?? "").split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let line = "";
+    for (const w of words) {
+      const test = line ? line + " " + w : w;
+      if (f.widthOfTextAtSize(test, size) > maxWidth) {
+        if (line) lines.push(line);
+        line = w;
+      } else line = test;
+    }
+    if (line) lines.push(line);
+    return lines;
+  };
+  const draw = (text: string, f = font, size = 10) => {
+    ensure(lineHeight);
+    page.drawText(text, { x: margin, y: y - size, size, font: f, color: rgb(0.1, 0.1, 0.12) });
+    y -= lineHeight;
+  };
+  const para = (text: string, f = font, size = 10) => {
+    for (const ln of wrap(text, f, size)) draw(ln, f, size);
+  };
+  const heading = (text: string) => {
+    ensure(lineHeight + sectionGap);
+    y -= 2;
+    page.drawText(text.toUpperCase(), { x: margin, y: y - 11, size: 11, font: bold, color: rgb(0.1, 0.1, 0.12) });
+    y -= lineHeight + 1;
+    page.drawLine({
+      start: { x: margin, y: y + 4 },
+      end: { x: width - margin, y: y + 4 },
+      thickness: 0.5,
+      color: rgb(0.7, 0.7, 0.75),
+    });
+    y -= sectionGap;
+  };
+
+  // Header
+  ensure(28);
+  page.drawText(r.name || "", { x: margin, y: y - 18, size: 18, font: bold, color: rgb(0.1, 0.1, 0.12) });
+  y -= 22;
+  const contactLine = [r.contact.email, r.contact.phone, r.contact.location, ...(r.contact.links ?? [])]
+    .filter(Boolean)
+    .join("  •  ");
+  if (contactLine) {
+    page.drawText(contactLine, { x: margin, y: y - 10, size: 9, font, color: rgb(0.35, 0.35, 0.4) });
+    y -= 14;
+  }
+
+  if (r.summary?.trim()) {
+    heading("Summary");
+    para(r.summary);
+  }
+  if (r.skills?.length) {
+    heading("Skills");
+    para(r.skills.join(" • "));
+  }
+  if (r.experience?.length) {
+    heading("Experience");
+    for (const e of r.experience) {
+      ensure(lineHeight * 2 + e.bullets.length * lineHeight);
+      draw(`${e.title} — ${e.company}`, bold, 10);
+      draw(e.period, font, 9);
+      for (const b of e.bullets) para(`• ${b}`);
+      y -= 2;
+    }
+  }
+  if (r.education?.length) {
+    // Keep all education entries on the same page — start a new page if they
+    // would otherwise be split across pages.
+    const eduHeight = lineHeight + sectionGap + r.education.length * (lineHeight * 2 + 2);
+    if (y - eduHeight < margin) newPage();
+    heading("Education");
+    for (const ed of r.education) {
+      draw(`${ed.degree}, ${ed.school}`, bold, 10);
+      draw(ed.period, font, 9);
+      y -= 2;
+    }
+  }
+
+  return await pdf.save();
+}
+
 export function resumeToPlainText(r: ResumeDoc): string {
   const lines: string[] = [];
   lines.push(`# ${r.name}`);
