@@ -55,3 +55,33 @@ export const bulkImportCompanies = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { inserted: inserted?.length ?? 0 };
   });
+
+export const discoveryTest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { data: company, error } = await context.supabase
+      .from("companies")
+      .select("id, name, careers_url")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!company) throw new Error("Company not found");
+    const { discoveryReport } = await import("@/lib/server/job-providers.server");
+    const r = await discoveryReport(company.careers_url);
+    await context.supabase.from("action_logs").insert({
+      user_id: context.userId,
+      action: "discovery.test",
+      target_type: "company",
+      target_id: company.id,
+      metadata: { source: r.source, diagnostics: r.diagnostics, sample_count: Math.min(5, r.jobs.length) } as any,
+    });
+    return {
+      company: company.name,
+      source: r.source,
+      diagnostics: r.diagnostics,
+      sampleTitles: r.jobs.slice(0, 5).map((j) => j.title),
+      sampleUrls: r.jobs.slice(0, 5).map((j) => j.apply_url),
+      total: r.jobs.length,
+    };
+  });
