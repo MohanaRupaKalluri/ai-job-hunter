@@ -27,11 +27,12 @@ const profileSchema = z.object({
   salary_min: z.number().int().min(0).nullable().optional(),
   salary_max: z.number().int().min(0).nullable().optional(),
   salary_currency: z.string().trim().max(8).default("USD"),
+  daily_digest_enabled: z.boolean().optional(),
 });
 
 export const upsertMyProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => profileSchema.parse(input))
+  .inputValidator((input: unknown) => profileSchema.partial().parse(input))
   .handler(async ({ data, context }) => {
     const payload = { ...data, id: context.userId, onboarded: true };
     const { error } = await context.supabase.from("profiles").upsert(payload, { onConflict: "id" });

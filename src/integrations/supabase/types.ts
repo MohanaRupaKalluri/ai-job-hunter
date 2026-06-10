@@ -302,6 +302,7 @@ export type Database = {
         Row: {
           created_at: string
           current_resume_url: string | null
+          daily_digest_enabled: boolean
           desired_roles: string[]
           email: string | null
           full_name: string | null
@@ -324,6 +325,7 @@ export type Database = {
         Insert: {
           created_at?: string
           current_resume_url?: string | null
+          daily_digest_enabled?: boolean
           desired_roles?: string[]
           email?: string | null
           full_name?: string | null
@@ -346,6 +348,7 @@ export type Database = {
         Update: {
           created_at?: string
           current_resume_url?: string | null
+          daily_digest_enabled?: boolean
           desired_roles?: string[]
           email?: string | null
           full_name?: string | null
