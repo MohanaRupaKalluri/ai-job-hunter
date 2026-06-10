@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ArrowLeft, ExternalLink, Loader2, Sparkles, FlaskConical } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, Sparkles, FlaskConical, RotateCw } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,8 +29,12 @@ function JobDetailPage() {
     queryFn: () => fetchJob({ data: { id } }),
   });
   const testMatch = useMutation({
-    mutationFn: () => testFn({ data: { id } }),
-    onSuccess: (r: any) => { toast.success(`Re-scored: ${Math.round(r.overall_score)} (${r.category})`); qc.invalidateQueries({ queryKey: ["job", id] }); },
+    mutationFn: (v: { force?: boolean }) => testFn({ data: { id, force: !!v.force } }),
+    onSuccess: (r: any) => {
+      const label = r?.cached ? "Loaded cached match (no AI used)" : `Re-scored with AI: ${Math.round(r.overall_score)} (${r.category})`;
+      toast.success(label);
+      qc.invalidateQueries({ queryKey: ["job", id] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -58,8 +62,11 @@ function JobDetailPage() {
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={() => testMatch.mutate()} disabled={testMatch.isPending}>
+          <Button variant="outline" onClick={() => testMatch.mutate({})} disabled={testMatch.isPending} title="Use cached match if available">
             {testMatch.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FlaskConical className="h-4 w-4 mr-2" />}Test match
+          </Button>
+          <Button variant="outline" onClick={() => testMatch.mutate({ force: true })} disabled={testMatch.isPending} title="Re-run AI match (≈1 credit)">
+            <RotateCw className="h-4 w-4 mr-2" />Regenerate match
           </Button>
           <Button asChild><a href={(job as any).apply_url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4 mr-2" />Open posting</a></Button>
         </div>

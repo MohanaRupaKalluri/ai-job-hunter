@@ -38,18 +38,22 @@ export const getDocumentUrl = createServerFn({ method: "POST" })
 
 export const generateResumeForJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ job_id: z.string().uuid() }).parse(input))
+  .inputValidator((input: unknown) =>
+    z.object({ job_id: z.string().uuid(), force: z.boolean().optional() }).parse(input),
+  )
   .handler(async ({ data, context }) => {
     const { runResumeGeneration } = await import("@/lib/server/document-pipeline.server");
-    const out = await runResumeGeneration(context.userId, data.job_id);
+    const out = await runResumeGeneration(context.userId, data.job_id, { force: !!data.force });
     return out;
   });
 
 export const generateCoverLetterForJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ job_id: z.string().uuid() }).parse(input))
+  .inputValidator((input: unknown) =>
+    z.object({ job_id: z.string().uuid(), force: z.boolean().optional() }).parse(input),
+  )
   .handler(async ({ data, context }) => {
     const { runCoverLetterGeneration } = await import("@/lib/server/document-pipeline.server");
-    const out = await runCoverLetterGeneration(context.userId, data.job_id);
+    const out = await runCoverLetterGeneration(context.userId, data.job_id, { force: !!data.force });
     return out;
   });

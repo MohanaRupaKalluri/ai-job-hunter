@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
-import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2, Plus, Trash2, AlertTriangle, Info } from "lucide-react";
+import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2, Plus, Trash2, AlertTriangle, Info, RotateCw } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,8 +82,16 @@ function JobsPage() {
     onSuccess: () => { toast.success("Job imported."); setImportOpen(false); setImportForm({ url: "", title: "", company: "", location: "", description: "" }); invalidate(); },
     onError: (e: Error) => toast.error(e.message),
   });
-  const makeResume = useMutation({ mutationFn: (id: string) => resumeFn({ data: { job_id: id } }), onSuccess: () => { toast.success("Resume generated."); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
-  const makeCover = useMutation({ mutationFn: (id: string) => coverFn({ data: { job_id: id } }), onSuccess: () => { toast.success("Cover letter generated."); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
+  const makeResume = useMutation({
+    mutationFn: (v: { id: string; force?: boolean }) => resumeFn({ data: { job_id: v.id, force: !!v.force } }),
+    onSuccess: (r: any) => { toast.success(r?.cached ? "Loaded existing resume (no AI used)." : "Resume generated (used ~1 AI credit)."); invalidate(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const makeCover = useMutation({
+    mutationFn: (v: { id: string; force?: boolean }) => coverFn({ data: { job_id: v.id, force: !!v.force } }),
+    onSuccess: (r: any) => { toast.success(r?.cached ? "Loaded existing cover letter (no AI used)." : "Cover letter generated (used ~1 AI credit)."); invalidate(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const addToTracker = useMutation({ mutationFn: (id: string) => saveFn({ data: { job_id: id, status: "found" } }), onSuccess: () => { toast.success("Added to tracker."); invalidate(); }, onError: (e: Error) => toast.error(e.message) });
 
   function exportRows(format: "csv"|"xlsx") {
@@ -132,8 +140,10 @@ function JobsPage() {
           <div className="flex gap-2 flex-wrap">
             <Button variant="outline" size="sm" onClick={() => addToTracker.mutate(j.id)}><Bookmark className="h-4 w-4 mr-1" />Track</Button>
             <Button variant="outline" size="sm" asChild><Link to="/jobs/$id" params={{ id: j.id }}><Info className="h-4 w-4 mr-1" />Details</Link></Button>
-            <Button variant="outline" size="sm" disabled={!canGen || makeResume.isPending} onClick={() => makeResume.mutate(j.id)} title={canGen ? "Generate ATS resume" : "Available for 75+ matches"}>{makeResume.isPending && makeResume.variables === j.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileText className="h-4 w-4 mr-1" />}Resume</Button>
-            <Button variant="outline" size="sm" disabled={makeCover.isPending} onClick={() => makeCover.mutate(j.id)}>{makeCover.isPending && makeCover.variables === j.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Mail className="h-4 w-4 mr-1" />}Cover</Button>
+            <Button variant="outline" size="sm" disabled={!canGen || makeResume.isPending} onClick={() => makeResume.mutate({ id: j.id })} title={canGen ? "Use cached resume or generate one (≈1 credit)" : "Available for 75+ matches"}>{makeResume.isPending && (makeResume.variables as any)?.id === j.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileText className="h-4 w-4 mr-1" />}Resume</Button>
+            <Button variant="ghost" size="icon" disabled={!canGen || makeResume.isPending} onClick={() => makeResume.mutate({ id: j.id, force: true })} title="Regenerate resume (≈1 credit)" className="h-8 w-8"><RotateCw className="h-3.5 w-3.5" /></Button>
+            <Button variant="outline" size="sm" disabled={makeCover.isPending} onClick={() => makeCover.mutate({ id: j.id })} title="Use cached cover letter or generate one (≈1 credit)">{makeCover.isPending && (makeCover.variables as any)?.id === j.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Mail className="h-4 w-4 mr-1" />}Cover</Button>
+            <Button variant="ghost" size="icon" disabled={makeCover.isPending} onClick={() => makeCover.mutate({ id: j.id, force: true })} title="Regenerate cover letter (≈1 credit)" className="h-8 w-8"><RotateCw className="h-3.5 w-3.5" /></Button>
             <Button size="sm" onClick={() => setConfirmJob({ id: j.id, apply_url: j.apply_url, title: j.title })}><ExternalLink className="h-4 w-4 mr-1" />Apply</Button>
           </div>
         </div></Card>

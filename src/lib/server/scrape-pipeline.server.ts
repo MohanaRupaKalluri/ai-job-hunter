@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { z } from "zod";
 import { createLovableAi } from "./ai-gateway.server";
+import { withAiErrors } from "./ai-errors.server";
 import { discoverJobs, type DiscoveredJob } from "./job-providers.server";
 import { extractJob } from "./job-extractor.server";
 import { classifyRole, applyScoreCaps } from "@/lib/role-classifier";
@@ -35,7 +36,7 @@ function categorize(score: number): "excellent" | "strong" | "moderate" | "weak"
 export async function scoreJobAgainstProfile(profile: any, job: any) {
   const model = createLovableAi();
   const roleClass = classifyRole(job.title, job.description);
-  const { text } = await generateText({
+  const { text } = await withAiErrors("AI match analysis", () => generateText({
     model,
     messages: [
       {
@@ -65,7 +66,7 @@ export async function scoreJobAgainstProfile(profile: any, job: any) {
         )}\n\nJOB:\nTitle: ${job.title}\nCompany: ${job.company_name}\nLocation: ${job.location ?? "Unknown"}\nType: ${job.employment_type ?? "Unknown"}\nDescription:\n${(job.description ?? "").slice(0, 4000)}`,
       },
     ],
-  });
+  }));
   const parsed = matchSchema.parse(extractJson(text));
   const rawOverall =
     parsed.role_score * 0.4 +
