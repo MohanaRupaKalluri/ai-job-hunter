@@ -44,12 +44,18 @@ export async function scoreJobAgainstProfile(profile: any, job: any) {
         role: "user",
         content: `CANDIDATE PROFILE:\n${JSON.stringify(
           {
-            skills: profile.skills,
+            skills:
+              profile.profile_resume_text
+                ? profile.resume_parsed_skills?.length
+                  ? profile.resume_parsed_skills
+                  : profile.skills
+                : profile.skills,
+            technologies: profile.resume_parsed_technologies ?? [],
             years_experience: profile.years_experience,
             desired_roles: profile.desired_roles,
             preferred_locations: profile.preferred_locations,
             remote_preference: profile.remote_preference,
-            summary: profile.summary ?? "",
+            resume_excerpt: (profile.profile_resume_text ?? "").slice(0, 4000),
           },
           null,
           2,
