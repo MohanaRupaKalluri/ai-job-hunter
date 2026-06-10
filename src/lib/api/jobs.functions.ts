@@ -147,10 +147,21 @@ export const recalculateAllScores = createServerFn({ method: "POST" })
 
 export const testMatchForJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .inputValidator((input: unknown) =>
+    z.object({ id: z.string().uuid(), force: z.boolean().optional() }).parse(input),
+  )
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { scoreJobAgainstProfile } = await import("@/lib/server/scrape-pipeline.server");
+    if (!data.force) {
+      const { data: existing } = await supabaseAdmin
+        .from("job_matches")
+        .select("*")
+        .eq("user_id", context.userId)
+        .eq("job_id", data.id)
+        .maybeSingle();
+      if (existing) return { ...existing, cached: true as const };
+    }
     const { data: profile } = await supabaseAdmin.from("profiles").select("*").eq("id", context.userId).maybeSingle();
     const { data: job } = await supabaseAdmin
       .from("jobs")
@@ -176,7 +187,7 @@ export const testMatchForJob = createServerFn({ method: "POST" })
       },
       { onConflict: "user_id,job_id" },
     );
-    return score;
+    return { ...score, cached: false as const };
   });
 
 export const importJobManual = createServerFn({ method: "POST" })
