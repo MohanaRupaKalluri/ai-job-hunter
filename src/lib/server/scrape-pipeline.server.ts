@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createLovableAi } from "./ai-gateway.server";
 import { discoverJobs, type DiscoveredJob } from "./job-providers.server";
 import { extractJob } from "./job-extractor.server";
-import { classifyRole, applyScoreCaps, REJECT_TITLES } from "./role-classifier.server";
+import { classifyRole, applyScoreCaps } from "@/lib/role-classifier";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const matchSchema = z.object({

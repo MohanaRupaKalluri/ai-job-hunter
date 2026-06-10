@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
-import { REJECT_TITLES, ACCEPT_TITLES, SOFTWARE_HINTS } from "@/lib/server/role-classifier.server";
+import { REJECT_TITLES, ACCEPT_TITLES, SOFTWARE_HINTS } from "@/lib/role-classifier";
 
 export const listJobs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
