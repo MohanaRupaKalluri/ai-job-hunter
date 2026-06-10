@@ -149,8 +149,7 @@ async function fetchWorkable(slug: string): Promise<DiscoveredJob[]> {
 // Words that suggest a page LISTS jobs (career hub / index).
 const LISTING_HINTS = /(careers?|jobs?|openings?|opportunities|positions?|roles?|vacanc|search[-_]?jobs|join[-_]?us|work[-_]?with[-_]?us|hiring|talent)/i;
 // Words/patterns that suggest a single job DETAIL page.
-const DETAIL_HINTS =
-  /(\/jobs?\/|\/careers?\/[^/]+\/|\/positions?\/|\/openings?\/|\/opportunit(?:y|ies)\/|\/roles?\/|\/posting\/|\/vacanc(?:y|ies)\/|gh_jid=|job[-_]?id=|requisition|/i;
+const DETAIL_HINTS = /(\/jobs?\/|\/careers?\/[^/]+\/|\/positions?\/|\/openings?\/|\/opportunit(?:y|ies)\/|\/roles?\/|\/posting\/|\/vacanc(?:y|ies)\/|gh_jid=|job[-_]?id=|requisition)/i;
 const DETAIL_SLUG = /\/[a-z0-9][a-z0-9-_]{6,}/i; // long slug after path segment
 const ASSET_RE = /\.(png|jpe?g|gif|svg|webp|ico|css|js|pdf|zip|mp4|webm|woff2?)(\?|$)/i;
 
