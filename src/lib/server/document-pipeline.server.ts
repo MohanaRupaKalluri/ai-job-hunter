@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { createLovableAi } from "./ai-gateway.server";
+import { withAiErrors } from "./ai-errors.server";
 import {
   type ResumeDoc,
   resumeToDocx,
@@ -56,10 +57,37 @@ async function loadJobWithProfile(userId: string, jobId: string) {
   return { profile, job };
 }
 
-export async function runResumeGeneration(userId: string, jobId: string) {
+async function findCachedDocument(userId: string, jobId: string, kind: "resume" | "cover_letter") {
+  // Prefer the most recent PDF when both formats exist.
+  const { data } = await supabaseAdmin
+    .from("generated_documents")
+    .select("id, format, created_at, kind")
+    .eq("user_id", userId)
+    .eq("job_id", jobId)
+    .eq("kind", kind)
+    .order("created_at", { ascending: false })
+    .limit(5);
+  if (!data?.length) return null;
+  const pdf = data.find((d) => d.format === "pdf");
+  const chosen = pdf ?? data[0];
+  const siblings = data.filter((d) => d.format !== chosen.format);
+  return { primary: chosen, sibling: siblings[0] ?? null };
+}
+
+export async function runResumeGeneration(userId: string, jobId: string, opts?: { force?: boolean }) {
+  if (!opts?.force) {
+    const cached = await findCachedDocument(userId, jobId, "resume");
+    if (cached) {
+      return {
+        docx_id: cached.primary.format === "docx" ? cached.primary.id : cached.sibling?.id ?? null,
+        pdf_id: cached.primary.format === "pdf" ? cached.primary.id : cached.sibling?.id ?? null,
+        cached: true as const,
+      };
+    }
+  }
   const { profile, job } = await loadJobWithProfile(userId, jobId);
   const model = createLovableAi();
-  const { text } = await generateText({
+  const { text } = await withAiErrors("Resume generation", () => generateText({
     model,
     messages: [
       {
@@ -72,7 +100,7 @@ export async function runResumeGeneration(userId: string, jobId: string) {
         content: `CANDIDATE PROFILE (factual source — do not embellish):\n${JSON.stringify(profile, null, 2)}\n\nJOB:\nTitle: ${job.title}\nCompany: ${job.company_name}\nLocation: ${job.location ?? ""}\nDescription:\n${(job.description ?? "").slice(0, 6000)}`,
       },
     ],
-  });
+  }));
   const resume = resumeSchema.parse(extractJson(text)) as ResumeDoc;
 
   const docxBytes = await resumeToDocx(resume);
@@ -136,10 +164,16 @@ export async function runResumeGeneration(userId: string, jobId: string) {
     metadata: { docx_id: docxRow?.id, pdf_id: pdfRow?.id },
   });
 
-  return { docx_id: docxRow?.id, pdf_id: pdfRow?.id };
+  return { docx_id: docxRow?.id, pdf_id: pdfRow?.id, cached: false as const };
 }
 
-export async function runCoverLetterGeneration(userId: string, jobId: string) {
+export async function runCoverLetterGeneration(userId: string, jobId: string, opts?: { force?: boolean }) {
+  if (!opts?.force) {
+    const cached = await findCachedDocument(userId, jobId, "cover_letter");
+    if (cached) {
+      return { document_id: cached.primary.id, cached: true as const };
+    }
+  }
   const { profile, job } = await loadJobWithProfile(userId, jobId);
   // Pull the latest match (if any) so the letter can highlight matched skills.
   const { data: matchRow } = await supabaseAdmin
@@ -149,7 +183,7 @@ export async function runCoverLetterGeneration(userId: string, jobId: string) {
     .eq("job_id", jobId)
     .maybeSingle();
   const model = createLovableAi();
-  const { text } = await generateText({
+  const { text } = await withAiErrors("Cover letter generation", () => generateText({
     model,
     messages: [
       {
@@ -162,7 +196,7 @@ export async function runCoverLetterGeneration(userId: string, jobId: string) {
         content: `PROFILE:\n${JSON.stringify(profile, null, 2)}\n\nMATCHED_SKILLS: ${(matchRow?.matched_skills ?? []).join(", ") || "(none yet)"}\nMATCH_RATIONALE: ${matchRow?.rationale ?? "(none)"}\n\nJOB:\nCompany: ${job.company_name}\nTitle: ${job.title}\nLocation: ${job.location ?? ""}\nDescription:\n${(job.description ?? "").slice(0, 5000)}`,
       },
     ],
-  });
+  }));
   const letter = text.trim();
   const pdfBytes = await textToPdf(`Cover Letter — ${job.title} at ${job.company_name}`, letter);
   const ts = Date.now();
@@ -203,5 +237,5 @@ export async function runCoverLetterGeneration(userId: string, jobId: string) {
     metadata: { document_id: row?.id },
   });
 
-  return { document_id: row?.id };
+  return { document_id: row?.id, cached: false as const };
 }
