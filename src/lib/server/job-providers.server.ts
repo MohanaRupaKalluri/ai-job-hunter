@@ -146,30 +146,143 @@ async function fetchWorkable(slug: string): Promise<DiscoveredJob[]> {
 
 // ---------- Generic fallback (fetch + HTML link harvest) ----------
 
-const JOB_LINK_HINTS = /(jobs?|career|positions?|roles?|opening|apply|posting|vacanc)/i;
+// Words that suggest a page LISTS jobs (career hub / index).
+const LISTING_HINTS = /(careers?|jobs?|openings?|opportunities|positions?|roles?|vacanc|search[-_]?jobs|join[-_]?us|work[-_]?with[-_]?us|hiring|talent)/i;
+// Words/patterns that suggest a single job DETAIL page.
+const DETAIL_HINTS = /(\/jobs?\/|\/careers?\/[^/]+\/|\/positions?\/|\/openings?\/|\/opportunit(?:y|ies)\/|\/roles?\/|\/posting\/|\/vacanc(?:y|ies)\/|gh_jid=|job[-_]?id=|requisition)/i;
+const DETAIL_SLUG = /\/[a-z0-9][a-z0-9-_]{6,}/i; // long slug after path segment
+const ASSET_RE = /\.(png|jpe?g|gif|svg|webp|ico|css|js|pdf|zip|mp4|webm|woff2?)(\?|$)/i;
 
-async function fetchGeneric(careersUrl: string): Promise<DiscoveredJob[]> {
-  const res = await fetch(careersUrl, {
-    headers: {
-      "user-agent": "Mozilla/5.0 (compatible; AIJobHunterBot/1.0)",
-      accept: "text/html,application/xhtml+xml",
-    },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const html = await res.text();
+type Anchor = { url: string; text: string };
+
+function parseAnchors(html: string, base: string): Anchor[] {
   const anchorRe = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  const seen = new Map<string, string>();
+  const out: Anchor[] = [];
   let m: RegExpExecArray | null;
   while ((m = anchorRe.exec(html)) !== null) {
     const href = m[1];
     const text = stripHtml(m[2]);
-    if (!href || !text || text.length < 3 || text.length > 160) continue;
-    if (!JOB_LINK_HINTS.test(href) && !JOB_LINK_HINTS.test(text)) continue;
-    const url = abs(href, careersUrl);
+    if (!href) continue;
+    if (href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:")) continue;
+    const url = abs(href, base);
     if (!/^https?:/i.test(url)) continue;
-    if (!seen.has(url)) seen.set(url, text);
+    if (ASSET_RE.test(url)) continue;
+    out.push({ url, text });
   }
-  return Array.from(seen.entries()).slice(0, 80).map(([url, text]) => ({
+  return out;
+}
+
+function sameHost(a: string, b: string) {
+  try { return new URL(a).hostname.replace(/^www\./, "") === new URL(b).hostname.replace(/^www\./, ""); }
+  catch { return false; }
+}
+
+function looksLikeListing(a: Anchor) {
+  return LISTING_HINTS.test(a.url) || LISTING_HINTS.test(a.text);
+}
+function looksLikeDetail(a: Anchor) {
+  if (LISTING_HINTS.test(a.text) && !DETAIL_HINTS.test(a.url)) return false;
+  if (DETAIL_HINTS.test(a.url)) return true;
+  // a long descriptive anchor under a /careers or /jobs path is probably a posting
+  if (/\/(careers?|jobs?|openings?|positions?)\//i.test(a.url) && DETAIL_SLUG.test(a.url) && a.text.length >= 6 && a.text.length <= 160) return true;
+  return false;
+}
+
+async function fetchHtml(url: string, timeoutMs = 15000): Promise<string> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: {
+        "user-agent": "Mozilla/5.0 (compatible; AIJobHunterBot/1.0)",
+        accept: "text/html,application/xhtml+xml",
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export type GenericDiagnostics = {
+  startUrl: string;
+  pagesVisited: string[];
+  listingPagesFound: string[];
+  isCareerHomepage: boolean;
+  jobLinksDiscovered: number;
+};
+
+/**
+ * Generic crawl up to 2 levels deep from the supplied careers URL.
+ * Level 0: the supplied URL
+ * Level 1: listing-like links discovered on level 0 (same host)
+ * Job-detail links found at any level are collected.
+ */
+async function crawlGeneric(
+  careersUrl: string,
+  opts: { maxPages?: number; maxDetails?: number } = {},
+): Promise<{ jobs: DiscoveredJob[]; diagnostics: GenericDiagnostics }> {
+  const maxPages = opts.maxPages ?? 8;
+  const maxDetails = opts.maxDetails ?? 80;
+
+  const diagnostics: GenericDiagnostics = {
+    startUrl: careersUrl,
+    pagesVisited: [],
+    listingPagesFound: [],
+    isCareerHomepage: false,
+    jobLinksDiscovered: 0,
+  };
+
+  const visited = new Set<string>();
+  const detail = new Map<string, string>(); // url -> title
+  // BFS queue with depth.
+  const queue: { url: string; depth: number }[] = [{ url: careersUrl, depth: 0 }];
+
+  while (queue.length && visited.size < maxPages && detail.size < maxDetails) {
+    const { url, depth } = queue.shift()!;
+    if (visited.has(url)) continue;
+    visited.add(url);
+    diagnostics.pagesVisited.push(url);
+    let html = "";
+    try { html = await fetchHtml(url); } catch { continue; }
+    const anchors = parseAnchors(html, url).filter((a) => sameHost(a.url, careersUrl));
+
+    let detailOnThisPage = 0;
+    for (const a of anchors) {
+      if (looksLikeDetail(a) && a.text && a.text.length >= 3 && a.text.length <= 160) {
+        if (!detail.has(a.url)) detail.set(a.url, a.text);
+        detailOnThisPage += 1;
+        if (detail.size >= maxDetails) break;
+      }
+    }
+
+    // Treat the start page as a "career homepage" if it produced almost no
+    // detail links but exposes listing-style navigation.
+    if (depth === 0 && detailOnThisPage < 3) {
+      const listings = anchors.filter(looksLikeListing);
+      diagnostics.isCareerHomepage = listings.length > 0;
+      // Enqueue up to ~6 unique listing destinations, depth+1.
+      const enq: string[] = [];
+      for (const a of listings) {
+        if (enq.length >= 6) break;
+        if (visited.has(a.url) || queue.some((q) => q.url === a.url)) continue;
+        // Don't re-enqueue the start URL itself or the homepage.
+        try {
+          const u = new URL(a.url);
+          if (u.pathname === "/" || a.url === careersUrl) continue;
+        } catch { continue; }
+        enq.push(a.url);
+        diagnostics.listingPagesFound.push(a.url);
+        queue.push({ url: a.url, depth: depth + 1 });
+      }
+    }
+  }
+
+  diagnostics.jobLinksDiscovered = detail.size;
+
+  const jobs: DiscoveredJob[] = Array.from(detail.entries()).map(([url, text]) => ({
     title: text,
     apply_url: url,
     location: null,
@@ -178,6 +291,7 @@ async function fetchGeneric(careersUrl: string): Promise<DiscoveredJob[]> {
     description: null,
     external_id: null,
   }));
+  return { jobs, diagnostics };
 }
 
 // ---------- Public entry point ----------
@@ -185,6 +299,7 @@ async function fetchGeneric(careersUrl: string): Promise<DiscoveredJob[]> {
 export type DiscoverResult = {
   jobs: DiscoveredJob[];
   source: "greenhouse" | "lever" | "workable" | "generic" | "firecrawl";
+  diagnostics?: GenericDiagnostics;
 };
 
 export async function discoverJobs(careersUrl: string): Promise<DiscoverResult> {
@@ -196,10 +311,10 @@ export async function discoverJobs(careersUrl: string): Promise<DiscoverResult> 
   if (provider.kind === "workable")
     return { jobs: await fetchWorkable(provider.slug), source: "workable" };
 
-  // Generic: try fetch first (free, no JS).
+  // Generic crawl up to 2 levels deep (free, no JS).
   try {
-    const jobs = await fetchGeneric(careersUrl);
-    if (jobs.length > 0) return { jobs, source: "generic" };
+    const { jobs, diagnostics } = await crawlGeneric(careersUrl);
+    if (jobs.length > 0) return { jobs, source: "generic", diagnostics };
   } catch {
     // fall through to Firecrawl if available
   }
@@ -211,4 +326,30 @@ export async function discoverJobs(careersUrl: string): Promise<DiscoverResult> 
     return { jobs, source: "firecrawl" };
   }
   return { jobs: [], source: "generic" };
+}
+
+/**
+ * Read-only discovery report used by the "Discovery Test" button.
+ * Returns the same generic crawl output PLUS diagnostics, without saving anything.
+ */
+export async function discoveryReport(careersUrl: string): Promise<{
+  source: DiscoverResult["source"];
+  jobs: DiscoveredJob[];
+  diagnostics: GenericDiagnostics;
+}> {
+  const empty: GenericDiagnostics = {
+    startUrl: careersUrl, pagesVisited: [], listingPagesFound: [],
+    isCareerHomepage: false, jobLinksDiscovered: 0,
+  };
+  const provider = detectProvider(careersUrl);
+  if (provider.kind !== "generic") {
+    const r = await discoverJobs(careersUrl);
+    return { source: r.source, jobs: r.jobs, diagnostics: { ...empty, jobLinksDiscovered: r.jobs.length } };
+  }
+  try {
+    const { jobs, diagnostics } = await crawlGeneric(careersUrl);
+    return { source: "generic", jobs, diagnostics };
+  } catch (e) {
+    return { source: "generic", jobs: [], diagnostics: empty };
+  }
 }

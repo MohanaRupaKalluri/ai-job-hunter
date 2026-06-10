@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery, queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { listCompanies, createCompany, updateCompany, deleteCompany, bulkImportCompanies } from "@/lib/api/companies.functions";
+import { listCompanies, createCompany, updateCompany, deleteCompany, bulkImportCompanies, discoveryTest } from "@/lib/api/companies.functions";
 import { triggerScrapeForMe } from "@/lib/api/jobs.functions";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { useState, useRef } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Upload, RefreshCw, Loader2 } from "lucide-react";
+import { Plus, Trash2, Upload, RefreshCw, Loader2, Search } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/companies")({ component: CompaniesPage });
 
@@ -23,6 +23,7 @@ function CompaniesPage() {
   const deleteFn = useServerFn(deleteCompany);
   const bulkFn = useServerFn(bulkImportCompanies);
   const scrapeFn = useServerFn(triggerScrapeForMe);
+  const discoverFn = useServerFn(discoveryTest);
   const qc = useQueryClient();
   const { data: companies } = useSuspenseQuery(queryOptions({ queryKey: ["companies"], queryFn: () => listFn() }));
 
@@ -59,6 +60,13 @@ function CompaniesPage() {
       invalidate();
       qc.invalidateQueries({ queryKey: ["jobs"] });
     },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const [discResult, setDiscResult] = useState<any | null>(null);
+  const discover = useMutation({
+    mutationFn: (id: string) => discoverFn({ data: { id } }),
+    onSuccess: (r: any) => setDiscResult(r),
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -135,6 +143,9 @@ function CompaniesPage() {
                   <TableCell><Switch checked={c.tracking_enabled} onCheckedChange={(v) => toggle.mutate({ id: c.id, tracking_enabled: v })} /></TableCell>
                   <TableCell>
                     <div className="flex gap-1 justify-end">
+                      <Button size="icon" variant="ghost" title="Discovery test (no save)" disabled={discover.isPending} onClick={() => discover.mutate(c.id)}>
+                        {discover.isPending && discover.variables === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                      </Button>
                       <Button size="icon" variant="ghost" title="Scrape this company" disabled={scrapeOne.isPending} onClick={() => scrapeOne.mutate(c.id)}>
                         {scrapeOne.isPending && scrapeOne.variables === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       </Button>
@@ -147,6 +158,64 @@ function CompaniesPage() {
           </Table>
         )}
       </Card>
+
+      <Dialog open={!!discResult} onOpenChange={(o) => !o && setDiscResult(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Discovery test · {discResult?.company}</DialogTitle>
+          </DialogHeader>
+          {discResult && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <Stat label="Source" value={discResult.source} />
+                <Stat label="Career homepage" value={discResult.diagnostics?.isCareerHomepage ? "Yes" : "No"} />
+                <Stat label="Pages visited" value={discResult.diagnostics?.pagesVisited?.length ?? 0} />
+                <Stat label="Listing pages" value={discResult.diagnostics?.listingPagesFound?.length ?? 0} />
+                <Stat label="Job links" value={discResult.diagnostics?.jobLinksDiscovered ?? 0} />
+                <Stat label="Total jobs" value={discResult.total} />
+              </div>
+              <div>
+                <p className="font-medium mb-1">Sample titles</p>
+                {discResult.sampleTitles?.length ? (
+                  <ul className="list-disc pl-5 space-y-0.5 text-muted-foreground">
+                    {discResult.sampleTitles.map((t: string, i: number) => <li key={i}>{t}</li>)}
+                  </ul>
+                ) : <p className="text-muted-foreground">No titles found.</p>}
+              </div>
+              <div>
+                <p className="font-medium mb-1">Sample URLs</p>
+                {discResult.sampleUrls?.length ? (
+                  <ul className="space-y-0.5 text-xs">
+                    {discResult.sampleUrls.map((u: string, i: number) => (
+                      <li key={i}><a href={u} target="_blank" rel="noreferrer" className="text-primary underline break-all">{u}</a></li>
+                    ))}
+                  </ul>
+                ) : <p className="text-muted-foreground">No URLs found.</p>}
+              </div>
+              {discResult.diagnostics?.listingPagesFound?.length ? (
+                <div>
+                  <p className="font-medium mb-1">Listing pages followed</p>
+                  <ul className="space-y-0.5 text-xs text-muted-foreground">
+                    {discResult.diagnostics.listingPagesFound.slice(0, 8).map((u: string, i: number) => (
+                      <li key={i} className="break-all">{u}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          )}
+          <DialogFooter><Button variant="ghost" onClick={() => setDiscResult(null)}>Close</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="rounded border bg-muted/30 p-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="font-semibold">{String(value ?? "—")}</div>
     </div>
   );
 }
