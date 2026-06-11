@@ -244,17 +244,13 @@ function JobsPage() {
             <div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold truncate">{j.title}</h3>{j.match && (<Badge variant="outline" className={scoreColor(score)}><Sparkles className="h-3 w-3 mr-1" />{score} • {j.match.category}</Badge>)}</div>
             <p className="text-sm text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
               <span>{j.company_name}</span>
-              {j.location ? (
-                <span>• {j.location}</span>
-              ) : (
-                <Badge variant="outline" className="text-xs">Location Unknown</Badge>
-              )}
-              {j.work_mode && j.work_mode !== "unknown" ? (
-                <Badge variant="secondary" className="text-xs capitalize">{j.work_mode}</Badge>
-              ) : null}
-              {j.country && j.country !== "United States" ? (
-                <Badge variant="outline" className="text-xs">{j.country}</Badge>
-              ) : null}
+              {(() => {
+                const display = formatJobLocation(j);
+                if (display === "Location unavailable") {
+                  return <Badge variant="outline" className="text-xs">Location unavailable</Badge>;
+                }
+                return <span>• {display}</span>;
+              })()}
               {j.employment_type ? <span>• {j.employment_type}</span> : null}
             </p>
             {j.matched_keywords?.length ? (
