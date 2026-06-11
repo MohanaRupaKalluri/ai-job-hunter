@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { REJECT_TITLES, ACCEPT_TITLES, SOFTWARE_HINTS } from "@/lib/role-classifier";
+import { JOB_KEYWORDS, matchKeywords } from "@/lib/job-keywords";
 
 export const listJobs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -17,6 +18,13 @@ export const listJobs = createServerFn({ method: "POST" })
         limit: z.number().int().min(1).max(500).default(200),
         softwareOnly: z.boolean().optional(),
         hideRejected: z.boolean().optional(),
+        keywords: z.array(z.string()).max(50).optional(),
+        workMode: z.enum(["any", "remote", "hybrid", "onsite"]).optional(),
+        usOnly: z.boolean().optional(),
+        excludeIndia: z.boolean().optional(),
+        showInternational: z.boolean().optional(),
+        state: z.string().trim().max(80).optional(),
+        city: z.string().trim().max(120).optional(),
       })
       .parse(input ?? {}),
   )
@@ -24,12 +32,14 @@ export const listJobs = createServerFn({ method: "POST" })
     let q = context.supabase
       .from("jobs")
       .select(
-        "id, title, company_name, location, employment_type, posted_date, apply_url, description, discovered_at, job_matches(overall_score, category, rationale, matched_skills, missing_skills), applications(id, status)",
+        "id, title, company_name, location, employment_type, posted_date, apply_url, description, requirements, department, city, state, country, work_mode, raw_location, matched_keywords, discovered_at, job_matches(overall_score, category, rationale, matched_skills, missing_skills), applications(id, status)",
       )
       .limit(data.limit);
-    if (data.search) q = q.or(`title.ilike.%${data.search}%,company_name.ilike.%${data.search}%`);
     if (data.company) q = q.ilike("company_name", `%${data.company}%`);
     if (data.location) q = q.ilike("location", `%${data.location}%`);
+    if (data.state) q = q.ilike("state", `%${data.state}%`);
+    if (data.city) q = q.ilike("city", `%${data.city}%`);
+    if (data.workMode && data.workMode !== "any") q = q.eq("work_mode", data.workMode);
     q = q.order("discovered_at", { ascending: false });
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
@@ -38,6 +48,48 @@ export const listJobs = createServerFn({ method: "POST" })
       match: j.job_matches?.[0] ?? null,
       application: j.applications?.[0] ?? null,
     }));
+    // Full-text search across every job field, not just title.
+    if (data.search) {
+      const s = data.search.toLowerCase();
+      result = result.filter((r) => {
+        const hay = [
+          r.title, r.company_name, r.location, r.description, r.requirements,
+          r.department, r.city, r.state, r.country,
+        ].filter(Boolean).join("\n").toLowerCase();
+        return hay.includes(s);
+      });
+    }
+    // Default location behavior: hide India + non-US unless user opts in.
+    if (data.excludeIndia ?? true) {
+      result = result.filter((r) => (r.country ?? "").toLowerCase() !== "india");
+    }
+    if (data.usOnly) {
+      result = result.filter((r) => {
+        const c = (r.country ?? "").toLowerCase();
+        // Allow US, or remote with unknown country (commonly remote-US).
+        return c === "united states" || (!r.country && r.work_mode === "remote");
+      });
+    } else if (!data.showInternational) {
+      // Default: hide explicitly non-US jobs; keep US + unknown-country.
+      result = result.filter((r) => {
+        const c = (r.country ?? "").toLowerCase();
+        return !c || c === "united states";
+      });
+    }
+    // Keyword chip filter: match against stored matched_keywords OR recompute
+    // from full text so old jobs (pre-migration) still respect the filter.
+    if (data.keywords?.length) {
+      const wanted = new Set(data.keywords);
+      result = result.filter((r) => {
+        const stored: string[] = r.matched_keywords ?? [];
+        if (stored.some((k) => wanted.has(k))) return true;
+        const live = matchKeywords({
+          title: r.title, description: r.description,
+          requirements: r.requirements, department: r.department,
+        });
+        return live.some((k) => wanted.has(k));
+      });
+    }
     if (data.hideRejected) {
       result = result.filter((r) => {
         const t = (r.title ?? "").toLowerCase();
@@ -49,7 +101,11 @@ export const listJobs = createServerFn({ method: "POST" })
         const t = (r.title ?? "").toLowerCase();
         if (REJECT_TITLES.some((k) => t.includes(k))) return false;
         if (ACCEPT_TITLES.some((k) => t.includes(k))) return true;
-        return SOFTWARE_HINTS.some((k) => t.includes(k));
+        if (SOFTWARE_HINTS.some((k) => t.includes(k))) return true;
+        // Broaden using full-text keyword catalog so a software description
+        // with a generic title (e.g. "Engineer II") still passes.
+        const hay = `${r.title ?? ""}\n${r.description ?? ""}\n${r.requirements ?? ""}`.toLowerCase();
+        return JOB_KEYWORDS.some((k) => k.aliases.some((a) => hay.includes(a)));
       });
     }
     if (data.minScore != null) result = result.filter((r) => (r.match?.overall_score ?? 0) >= data.minScore!);
@@ -81,7 +137,7 @@ export const triggerScrapeForMe = createServerFn({ method: "POST" })
     z
       .object({
         companyId: z.string().uuid().optional(),
-        mode: z.enum(["normal", "test"]).optional(),
+        mode: z.enum(["normal", "test", "us_software"]).optional(),
       })
       .parse(input ?? {}),
   )
