@@ -41,7 +41,7 @@ const NON_US_HINTS: Array<{ re: RegExp; country: string }> = [
   { re: /\b(japan|tokyo|osaka)\b/i, country: "Japan" },
   { re: /\b(china|shanghai|beijing|shenzhen)\b/i, country: "China" },
   { re: /\b(poland|warsaw|kraków|krakow)\b/i, country: "Poland" },
-  { re: /\b(netherlands|amsterdam|rotterdam)\b/i, country: "Netherlands" },
+  { re: /\b(netherlands|nederlands|nederland|amsterdam|rotterdam|the hague|den haag|utrecht|eindhoven)\b/i, country: "Netherlands" },
   { re: /\b(israel|tel aviv)\b/i, country: "Israel" },
   { re: /\b(emea|apac|latam)\b/i, country: "International" },
 ];
