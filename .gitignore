@@ -30,3 +30,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Env files (Lovable Cloud auto-provisions .env locally; use .env.example for forks)
+.env
+.env.local
+.env.*.local
+!.env.example
