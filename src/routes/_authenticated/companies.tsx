@@ -161,7 +161,7 @@ function CompaniesPage() {
                 <TableHead>Careers URL</TableHead>
                 <TableHead>Last scraped</TableHead>
                 <TableHead>Tracking</TableHead>
-                <TableHead className="w-32"></TableHead>
+                <TableHead className="w-40"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
