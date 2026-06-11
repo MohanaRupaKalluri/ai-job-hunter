@@ -98,3 +98,33 @@ export function isUSLocation(loc: { country?: string | null }): boolean {
 export function isIndiaLocation(loc: { country?: string | null }): boolean {
   return (loc.country ?? "").toLowerCase() === "india";
 }
+
+/**
+ * Render a job's structured location for display in cards/lists.
+ * Example outputs:
+ *   "Remote • United States"
+ *   "Hybrid • Columbus, Ohio, United States"
+ *   "Onsite • Dallas, Texas, United States"
+ *   "Location unavailable"
+ */
+export function formatJobLocation(j: {
+  work_mode?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  location?: string | null;
+  raw_location?: string | null;
+}): string {
+  const modeRaw = (j.work_mode ?? "").toLowerCase();
+  const mode =
+    modeRaw === "remote" ? "Remote" :
+    modeRaw === "hybrid" ? "Hybrid" :
+    modeRaw === "onsite" ? "Onsite" : null;
+  const geo = [j.city, j.state, j.country].filter(Boolean).join(", ");
+  if (mode && geo) return `${mode} • ${geo}`;
+  if (mode) return `${mode} • ${j.country ?? "Location unavailable"}`;
+  if (geo) return geo;
+  const raw = (j.location ?? j.raw_location ?? "").trim();
+  if (raw) return raw;
+  return "Location unavailable";
+}
