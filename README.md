@@ -92,14 +92,20 @@ Open the project in Lovable and click **Publish**. Cloud provisions Supabase, se
 
 The app is a standard TanStack Start project and runs on any host that supports Node 20+ or Cloudflare Workers (Vercel, Netlify edge, Fly.io, etc.). See [TanStack Start deployment docs](https://tanstack.com/start).
 
+## Project Status
+
+This project is actively being improved with better job matching, resume generation, and application tracking workflows.
+
+
 ## Screenshots
 
 > Drop PNGs in `docs/screenshots/` and reference them here.
 
 | | |
 |---|---|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Jobs](docs/screenshots/jobs.png) |
-| ![Job detail + match](docs/screenshots/job-detail.png) | ![Companies](docs/screenshots/companies.png) |
+Dashboard
+<img width="556" height="691" alt="image" src="https://github.com/user-attachments/assets/829f8706-b768-44b4-a610-92879020f3d5" />
+
 
 ## Contributing
 
