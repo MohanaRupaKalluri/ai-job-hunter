@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { listJobs, triggerScrapeForMe, importJobManual, clearAllJobs, getLatestScrapeRun } from "@/lib/api/jobs.functions";
 import { Switch } from "@/components/ui/switch";
 import { DEFAULT_CHIP_KEYWORDS } from "@/lib/job-keywords";
+import { formatJobLocation } from "@/lib/location-parser";
 import { generateResumeForJob, generateCoverLetterForJob } from "@/lib/api/documents.functions";
 import { upsertApplication, recordApplyAction } from "@/lib/api/applications.functions";
 
@@ -55,8 +56,7 @@ function JobsPage() {
   const [hideRejected, setHideRejected] = useState(true);
   const [activeChips, setActiveChips] = useState<string[]>([]);
   const [workMode, setWorkMode] = useState<"any"|"remote"|"hybrid"|"onsite">("any");
-  const [usOnly, setUsOnly] = useState(false);
-  const [showInternational, setShowInternational] = useState(false);
+  const [country, setCountry] = useState<"us"|"canada"|"remote"|"international"|"any">("us");
   const [excludeIndia, setExcludeIndia] = useState(true);
   const [stateFilter, setStateFilter] = useState("");
   const [cityFilter, setCityFilter] = useState("");
@@ -70,13 +70,13 @@ function JobsPage() {
   const [importForm, setImportForm] = useState({ url: "", title: "", company: "", location: "", description: "" });
 
   const { data: jobs, isLoading } = useQuery({
-    queryKey: ["jobs", search, minScore, category, sortBy, softwareOnly, hideRejected, activeChips, workMode, usOnly, showInternational, excludeIndia, stateFilter, cityFilter],
+    queryKey: ["jobs", search, minScore, category, sortBy, softwareOnly, hideRejected, activeChips, workMode, country, excludeIndia, stateFilter, cityFilter],
     queryFn: () => listFn({ data: {
       search: search || undefined,
       minScore: Number(minScore) || undefined,
       category, sortBy, softwareOnly, hideRejected,
       keywords: activeChips.length ? activeChips : undefined,
-      workMode, usOnly, showInternational, excludeIndia,
+      workMode, country, excludeIndia,
       state: stateFilter || undefined,
       city: cityFilter || undefined,
     } }),
@@ -144,7 +144,7 @@ function JobsPage() {
           <Button variant="outline" onClick={() => { setLastReport((latestRun as any)?.metadata ?? null); setLogsOpen(true); }}><ScrollText className="h-4 w-4 mr-2" />Scrape logs</Button>
           <Button variant="outline" onClick={() => setConfirmClear(true)} disabled={!jobs?.length}><Trash2 className="h-4 w-4 mr-2" />Clear jobs</Button>
           <Button variant="outline" onClick={() => setConfirmUsScrape(true)} disabled={scrape.isPending}>
-            {scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}US software only
+            {scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}Software Jobs (US)
           </Button>
           <Button onClick={() => setConfirmScrape(true)} disabled={scrape.isPending}>{scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}Scrape now</Button>
         </div>
@@ -155,7 +155,7 @@ function JobsPage() {
         <Select value={category} onValueChange={(v) => setCategory(v as any)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All categories</SelectItem><SelectItem value="excellent">Excellent</SelectItem><SelectItem value="strong">Strong</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="weak">Weak</SelectItem></SelectContent></Select>
         <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="score">Sort by score</SelectItem><SelectItem value="newest">Sort by newest</SelectItem></SelectContent></Select>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
         <Select value={workMode} onValueChange={(v) => setWorkMode(v as any)}>
           <SelectTrigger><SelectValue placeholder="Work mode" /></SelectTrigger>
           <SelectContent>
@@ -163,6 +163,16 @@ function JobsPage() {
             <SelectItem value="remote">Remote</SelectItem>
             <SelectItem value="hybrid">Hybrid</SelectItem>
             <SelectItem value="onsite">Onsite</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={country} onValueChange={(v) => setCountry(v as any)}>
+          <SelectTrigger><SelectValue placeholder="Country" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="us">United States</SelectItem>
+            <SelectItem value="canada">Canada</SelectItem>
+            <SelectItem value="remote">Remote (any country)</SelectItem>
+            <SelectItem value="international">International</SelectItem>
+            <SelectItem value="any">Any country</SelectItem>
           </SelectContent>
         </Select>
         <Input placeholder="State (e.g. Texas)" value={stateFilter} onChange={(e) => setStateFilter(e.target.value)} />
@@ -180,16 +190,21 @@ function JobsPage() {
           );
         })}
         <button
-          onClick={() => setUsOnly((v) => !v)}
-          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${usOnly ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 text-foreground border-border hover:bg-muted"}`}
-        >United States</button>
+          onClick={() => { setCountry("us"); setStateFilter(""); setCityFilter(""); setWorkMode("any"); }}
+          className="text-xs px-2.5 py-1 rounded-full border transition-colors bg-muted/40 text-foreground border-border hover:bg-muted"
+          title="Open to any US location"
+        >Nationwide (US)</button>
+        <button
+          onClick={() => { setCountry("us"); setWorkMode("remote"); setStateFilter(""); setCityFilter(""); }}
+          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${country === "us" && workMode === "remote" ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 text-foreground border-border hover:bg-muted"}`}
+        >Remote US</button>
         <button
           onClick={() => setWorkMode((v) => v === "remote" ? "any" : "remote")}
           className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${workMode === "remote" ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 text-foreground border-border hover:bg-muted"}`}
         >Remote</button>
-        {activeChips.length || usOnly || workMode !== "any" || stateFilter || cityFilter ? (
+        {activeChips.length || country !== "us" || workMode !== "any" || stateFilter || cityFilter ? (
           <button
-            onClick={() => { setActiveChips([]); setUsOnly(false); setWorkMode("any"); setStateFilter(""); setCityFilter(""); }}
+            onClick={() => { setActiveChips([]); setCountry("us"); setWorkMode("any"); setStateFilter(""); setCityFilter(""); }}
             className="text-xs px-2.5 py-1 rounded-full border bg-transparent text-muted-foreground hover:bg-muted"
           >Clear filters</button>
         ) : null}
@@ -198,7 +213,6 @@ function JobsPage() {
         <label className="flex items-center gap-2 cursor-pointer"><Switch checked={softwareOnly} onCheckedChange={setSoftwareOnly} />Software jobs only</label>
         <label className="flex items-center gap-2 cursor-pointer"><Switch checked={hideRejected} onCheckedChange={setHideRejected} />Hide rejected roles (interns, sales, etc.)</label>
         <label className="flex items-center gap-2 cursor-pointer"><Switch checked={excludeIndia} onCheckedChange={setExcludeIndia} />Exclude India</label>
-        <label className="flex items-center gap-2 cursor-pointer"><Switch checked={showInternational} onCheckedChange={setShowInternational} />Show international jobs</label>
       </div>
       </Card>
       {isLoading ? (
