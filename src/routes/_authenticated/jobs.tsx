@@ -352,7 +352,11 @@ function JobsPage() {
               </div>
               {lastReport.skipReasons ? (
                 <div className="text-xs text-muted-foreground">
-                  Skip reasons — unrelated role: {lastReport.skipReasons.unrelated} · duplicate: {lastReport.skipReasons.duplicate} · missing description: {lastReport.skipReasons.missing_description} · error: {lastReport.skipReasons.error}
+                  Skip reasons —{" "}
+                  {Object.entries(lastReport.skipReasons)
+                    .filter(([, v]: any) => Number(v) > 0)
+                    .map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`)
+                    .join(" · ") || "none"}
                 </div>
               ) : null}
               <div className="rounded border overflow-hidden">
