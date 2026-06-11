@@ -56,6 +56,19 @@ export const bulkImportCompanies = createServerFn({ method: "POST" })
     return { inserted: inserted?.length ?? 0 };
   });
 
+export const enableAllTracking = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("companies")
+      .update({ tracking_enabled: true })
+      .eq("user_id", context.userId)
+      .eq("tracking_enabled", false)
+      .select("id");
+    if (error) throw new Error(error.message);
+    return { updated: data?.length ?? 0 };
+  });
+
 export const discoveryTest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))

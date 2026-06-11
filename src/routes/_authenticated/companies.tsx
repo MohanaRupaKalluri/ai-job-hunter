@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery, queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { listCompanies, createCompany, updateCompany, deleteCompany, bulkImportCompanies, discoveryTest, extractionTest } from "@/lib/api/companies.functions";
+import { listCompanies, createCompany, updateCompany, deleteCompany, bulkImportCompanies, discoveryTest, extractionTest, enableAllTracking } from "@/lib/api/companies.functions";
 import { triggerScrapeForMe } from "@/lib/api/jobs.functions";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { useState, useRef } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Upload, RefreshCw, Loader2, Search, FlaskConical } from "lucide-react";
+import { Plus, Trash2, Upload, RefreshCw, Loader2, Search, FlaskConical, Zap, AlertTriangle } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/companies")({ component: CompaniesPage });
 
@@ -25,6 +25,7 @@ function CompaniesPage() {
   const scrapeFn = useServerFn(triggerScrapeForMe);
   const discoverFn = useServerFn(discoveryTest);
   const extractFn = useServerFn(extractionTest);
+  const enableAllFn = useServerFn(enableAllTracking);
   const qc = useQueryClient();
   const { data: companies } = useSuspenseQuery(queryOptions({ queryKey: ["companies"], queryFn: () => listFn() }));
 
@@ -52,7 +53,8 @@ function CompaniesPage() {
   });
 
   const scrapeOne = useMutation({
-    mutationFn: (companyId: string) => scrapeFn({ data: { companyId } }),
+    mutationFn: (v: { companyId: string; mode?: "test" | "normal" }) =>
+      scrapeFn({ data: { companyId: v.companyId, mode: v.mode } }),
     onSuccess: (r: any) => {
       const cs = r?.companyStatuses?.[0];
       toast.success(
@@ -60,7 +62,14 @@ function CompaniesPage() {
       );
       invalidate();
       qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["latest-scrape"] });
     },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const enableAll = useMutation({
+    mutationFn: () => enableAllFn(),
+    onSuccess: (r: any) => { toast.success(`Enabled tracking on ${r.updated} companies`); invalidate(); },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -98,6 +107,8 @@ function CompaniesPage() {
     } catch (e) { toast.error((e as Error).message); }
   }
 
+  const disabledCount = companies.filter((c: any) => !c.tracking_enabled).length;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -122,6 +133,20 @@ function CompaniesPage() {
         </div>
       </div>
 
+      {disabledCount > 0 && (
+        <Card className="p-4 border-amber-500/40 bg-amber-500/5 flex items-center gap-3 flex-wrap">
+          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0" />
+          <div className="flex-1 min-w-[14rem]">
+            <p className="font-medium text-sm">{disabledCount} {disabledCount === 1 ? "company has" : "companies have"} tracking disabled</p>
+            <p className="text-xs text-muted-foreground">Disabled companies are skipped during "Scrape now".</p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => enableAll.mutate()} disabled={enableAll.isPending}>
+            {enableAll.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Enable tracking for all
+          </Button>
+        </Card>
+      )}
+
       <Card>
         {companies.length === 0 ? (
           <div className="p-12 text-center text-muted-foreground">
@@ -136,7 +161,7 @@ function CompaniesPage() {
                 <TableHead>Careers URL</TableHead>
                 <TableHead>Last scraped</TableHead>
                 <TableHead>Tracking</TableHead>
-                <TableHead className="w-32"></TableHead>
+                <TableHead className="w-40"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -157,8 +182,11 @@ function CompaniesPage() {
                       <Button size="icon" variant="ghost" title="Extraction test (first 5, no save)" disabled={extractTest.isPending} onClick={() => extractTest.mutate(c.id)}>
                         {extractTest.isPending && extractTest.variables === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
                       </Button>
-                      <Button size="icon" variant="ghost" title="Scrape this company" disabled={scrapeOne.isPending} onClick={() => scrapeOne.mutate(c.id)}>
-                        {scrapeOne.isPending && scrapeOne.variables === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      <Button size="icon" variant="ghost" title="Test scrape (first 5, ignore role filter, no scoring)" disabled={scrapeOne.isPending} onClick={() => scrapeOne.mutate({ companyId: c.id, mode: "test" })}>
+                        {scrapeOne.isPending && (scrapeOne.variables as any)?.companyId === c.id && (scrapeOne.variables as any)?.mode === "test" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                      </Button>
+                      <Button size="icon" variant="ghost" title="Scrape this company" disabled={scrapeOne.isPending} onClick={() => scrapeOne.mutate({ companyId: c.id })}>
+                        {scrapeOne.isPending && (scrapeOne.variables as any)?.companyId === c.id && !(scrapeOne.variables as any)?.mode ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       </Button>
                       <Button size="icon" variant="ghost" onClick={() => del.mutate(c.id)}><Trash2 className="h-4 w-4" /></Button>
                     </div>

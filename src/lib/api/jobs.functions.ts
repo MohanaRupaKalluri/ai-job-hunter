@@ -78,12 +78,32 @@ export const getJob = createServerFn({ method: "POST" })
 export const triggerScrapeForMe = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z.object({ companyId: z.string().uuid().optional() }).parse(input ?? {}),
+    z
+      .object({
+        companyId: z.string().uuid().optional(),
+        mode: z.enum(["normal", "test"]).optional(),
+      })
+      .parse(input ?? {}),
   )
   .handler(async ({ data, context }) => {
     const { runScrapeForUser } = await import("@/lib/server/scrape-pipeline.server");
-    const report = await runScrapeForUser(context.userId, { companyId: data.companyId });
+    const report = await runScrapeForUser(context.userId, { companyId: data.companyId, mode: data.mode });
     return report;
+  });
+
+export const getLatestScrapeRun = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("action_logs")
+      .select("action, metadata, created_at")
+      .eq("user_id", context.userId)
+      .in("action", ["scrape.completed", "scrape.test"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data;
   });
 
 export const clearAllJobs = createServerFn({ method: "POST" })

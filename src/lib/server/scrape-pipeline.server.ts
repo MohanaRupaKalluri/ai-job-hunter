@@ -105,8 +105,21 @@ export type RunReport = {
   extracted: number;
   extractionFailed: number;
   errors: { company: string; error: string }[];
-  companyStatuses?: { company: string; status: "success" | "partial" | "failed" | "timeout"; found: number; saved: number; skipped: number; scored: number; source?: string; error?: string }[];
+  companyStatuses?: {
+    company: string;
+    url?: string;
+    status: "success" | "partial" | "failed" | "timeout" | "skipped";
+    found: number;
+    saved: number;
+    skipped: number;
+    scored: number;
+    source?: string;
+    error?: string;
+    skipReasons?: { unrelated: number; duplicate: number; missing_description: number; error: number };
+  }[];
   sources?: Record<string, number>;
+  skipReasons?: { unrelated: number; duplicate: number; missing_description: number; error: number };
+  finishedAt?: string;
 };
 
 const ROLE_KEYWORDS = [
@@ -131,12 +144,13 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 
 export async function runScrapeForUser(
   userId: string,
-  opts: { companyId?: string; maxJobs?: number } = {},
+  opts: { companyId?: string; maxJobs?: number; mode?: "normal" | "test" } = {},
 ): Promise<RunReport> {
   const report: RunReport = {
     ok: true, scraped: 0, newJobs: 0, matched: 0, skipped: 0, scored: 0,
     companiesChecked: 0, extracted: 0, extractionFailed: 0,
     errors: [], companyStatuses: [], sources: {},
+    skipReasons: { unrelated: 0, duplicate: 0, missing_description: 0, error: 0 },
   };
 
   const { data: profile } = await supabaseAdmin.from("profiles").select("*").eq("id", userId).maybeSingle();
@@ -146,12 +160,22 @@ export async function runScrapeForUser(
   const { data: companies } = await cq;
 
   let totalSavedThisRun = 0;
-  const runCap = Math.min(opts.maxJobs ?? MAX_JOBS_PER_RUN, MAX_JOBS_PER_RUN);
+  const isTest = opts.mode === "test";
+  const perCompanyCap = isTest ? 5 : MAX_JOBS_PER_COMPANY;
+  const runCap = isTest ? (opts.maxJobs ?? 5) : Math.min(opts.maxJobs ?? MAX_JOBS_PER_RUN, MAX_JOBS_PER_RUN);
 
   for (const c of companies ?? []) {
     let errorMsg: string | null = null;
     let source = "generic";
-    const cStat = { company: c.name, status: "success" as "success"|"partial"|"failed"|"timeout", found: 0, saved: 0, skipped: 0, scored: 0, source: undefined as string | undefined, error: undefined as string | undefined };
+    const cStat = {
+      company: c.name,
+      url: c.careers_url as string | undefined,
+      status: "success" as "success"|"partial"|"failed"|"timeout"|"skipped",
+      found: 0, saved: 0, skipped: 0, scored: 0,
+      source: undefined as string | undefined,
+      error: undefined as string | undefined,
+      skipReasons: { unrelated: 0, duplicate: 0, missing_description: 0, error: 0 },
+    };
     report.companiesChecked += 1;
     if (totalSavedThisRun >= runCap) {
       cStat.status = "partial";
@@ -172,14 +196,16 @@ export async function runScrapeForUser(
       // For provider feeds we can pre-filter by description; for generic
       // results description is empty so filter only after extraction below.
       const providerHadDescription = source !== "generic" && source !== "firecrawl";
-      const preFiltered = providerHadDescription ? allJobs.filter(matchesRoleFilter) : allJobs;
+      const preFiltered = providerHadDescription && !isTest ? allJobs.filter(matchesRoleFilter) : allJobs;
       const preSkipped = providerHadDescription ? allJobs.length - preFiltered.length : 0;
       cStat.skipped += preSkipped;
+      cStat.skipReasons.unrelated += preSkipped;
       report.skipped += preSkipped;
+      report.skipReasons!.unrelated += preSkipped;
 
       // Per-company batch cap + global run cap.
       const remainingRun = runCap - totalSavedThisRun;
-      const batch = preFiltered.slice(0, Math.min(MAX_JOBS_PER_COMPANY, remainingRun));
+      const batch = preFiltered.slice(0, Math.min(perCompanyCap, remainingRun));
       const queuedForNext = preFiltered.length - batch.length;
       if (queuedForNext > 0) cStat.status = "partial";
 
@@ -212,12 +238,25 @@ export async function runScrapeForUser(
         if (extractionOk) report.extracted += 1; else report.extractionFailed += 1;
 
         // For generic sources, apply the role filter AFTER extraction so we
-        // can read the real description text.
-        if (!providerHadDescription) {
+        // can read the real description text. Test mode bypasses the filter.
+        if (!providerHadDescription && !isTest) {
           const passes = matchesRoleFilter({ title: finalTitle, description: finalDescription });
           if (!passes) {
             report.skipped += 1;
             cStat.skipped += 1;
+            cStat.skipReasons.unrelated += 1;
+            report.skipReasons!.unrelated += 1;
+            continue;
+          }
+        }
+
+        if (!finalDescription || finalDescription.trim().length < 30) {
+          // Still save it in test mode so the user can inspect raw discovery.
+          if (!isTest) {
+            report.skipped += 1;
+            cStat.skipped += 1;
+            cStat.skipReasons.missing_description += 1;
+            report.skipReasons!.missing_description += 1;
             continue;
           }
         }
@@ -246,12 +285,25 @@ export async function runScrapeForUser(
           )
           .select("id, title, company_name, location, employment_type, description, requirements")
           .maybeSingle();
-        if (insErr) continue;
-        if (!inserted) continue;
+        if (insErr) {
+          report.skipped += 1;
+          cStat.skipped += 1;
+          cStat.skipReasons.error += 1;
+          report.skipReasons!.error += 1;
+          continue;
+        }
+        if (!inserted) {
+          // Row already existed (duplicate apply_url for this user).
+          report.skipped += 1;
+          cStat.skipped += 1;
+          cStat.skipReasons.duplicate += 1;
+          report.skipReasons!.duplicate += 1;
+          continue;
+        }
         report.newJobs += 1;
         cStat.saved += 1;
         totalSavedThisRun += 1;
-        if (profile && extractionOk) {
+        if (profile && extractionOk && !isTest) {
           try {
             const score = await scoreJobAgainstProfile(profile, inserted);
             await supabaseAdmin.from("job_matches").upsert(
@@ -297,9 +349,10 @@ export async function runScrapeForUser(
       .eq("id", c.id);
   }
 
+  report.finishedAt = new Date().toISOString();
   await supabaseAdmin.from("action_logs").insert({
     user_id: userId,
-    action: "scrape.completed",
+    action: isTest ? "scrape.test" : "scrape.completed",
     metadata: report as any,
   });
 
