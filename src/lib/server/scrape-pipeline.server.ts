@@ -5,6 +5,8 @@ import { withAiErrors } from "./ai-errors.server";
 import { discoverJobs, type DiscoveredJob } from "./job-providers.server";
 import { extractJob } from "./job-extractor.server";
 import { classifyRole, applyScoreCaps } from "@/lib/role-classifier";
+import { matchKeywords, hasAnyKeyword } from "@/lib/job-keywords";
+import { parseLocation, isUSLocation, isIndiaLocation } from "@/lib/location-parser";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const matchSchema = z.object({
