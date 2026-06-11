@@ -117,24 +117,35 @@ export type RunReport = {
     scored: number;
     source?: string;
     error?: string;
-    skipReasons?: { unrelated: number; duplicate: number; missing_description: number; error: number };
+    skipReasons?: SkipReasons;
   }[];
   sources?: Record<string, number>;
-  skipReasons?: { unrelated: number; duplicate: number; missing_description: number; error: number };
+  skipReasons?: SkipReasons;
   finishedAt?: string;
 };
 
-const ROLE_KEYWORDS = [
-  ".net", "c#", "asp.net", "software engineer", "full stack", "fullstack",
-  "full-stack", "backend", "back-end", "sql server", "azure", "java",
-];
-function matchesRoleFilter(j: { title?: string | null; description?: string | null }) {
-  const hay = `${j.title ?? ""}\n${j.description ?? ""}`.toLowerCase();
-  return ROLE_KEYWORDS.some((k) => hay.includes(k));
+export type SkipReasons = {
+  unrelated: number;
+  duplicate: number;
+  missing_description: number;
+  error: number;
+  non_us_location: number;
+  india_location: number;
+  unknown_location: number;
+  non_technical: number;
+};
+
+function emptySkipReasons(): SkipReasons {
+  return {
+    unrelated: 0, duplicate: 0, missing_description: 0, error: 0,
+    non_us_location: 0, india_location: 0, unknown_location: 0, non_technical: 0,
+  };
 }
 
 const MAX_JOBS_PER_COMPANY = 10;
 const MAX_JOBS_PER_RUN = 50;
+const US_SOFTWARE_PER_COMPANY = 20;
+const US_SOFTWARE_PER_RUN = 300;
 const COMPANY_TIMEOUT_MS = 5 * 60 * 1000;
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
