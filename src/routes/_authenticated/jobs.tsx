@@ -227,7 +227,7 @@ function JobsPage() {
             <Button variant="outline" asChild><Link to="/companies"><RefreshCw className="h-4 w-4 mr-2" />Scrape Selected Company</Link></Button>
             <Button onClick={() => setConfirmUsScrape(true)} disabled={scrape.isPending}>
               {scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-              Scrape All — US Software Only
+              Scrape All — Software Jobs (US)
             </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)}><Plus className="h-4 w-4 mr-2" />Import Job URL</Button>
           </div>
@@ -319,14 +319,14 @@ function JobsPage() {
       <Dialog open={confirmUsScrape} onOpenChange={setConfirmUsScrape}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-400" />Scrape all — US software only?</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-400" />Scrape all — Software Jobs (US)?</DialogTitle>
             <DialogDescription>
               Runs a wider sweep capped at <strong>20 jobs per company</strong> and <strong>300 jobs total</strong>. Skips non-software roles, India, and other non-US locations before saving. You'll see per-skip reasons in the scrape log.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setConfirmUsScrape(false)}>Cancel</Button>
-            <Button onClick={() => { setConfirmUsScrape(false); scrape.mutate("us_software"); }}>Run US software scrape</Button>
+            <Button onClick={() => { setConfirmUsScrape(false); scrape.mutate("us_software"); }}>Run Software Jobs (US) scrape</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
