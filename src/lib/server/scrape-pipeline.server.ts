@@ -5,6 +5,8 @@ import { withAiErrors } from "./ai-errors.server";
 import { discoverJobs, type DiscoveredJob } from "./job-providers.server";
 import { extractJob } from "./job-extractor.server";
 import { classifyRole, applyScoreCaps } from "@/lib/role-classifier";
+import { matchKeywords, hasAnyKeyword } from "@/lib/job-keywords";
+import { parseLocation, isUSLocation, isIndiaLocation } from "@/lib/location-parser";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const matchSchema = z.object({
@@ -115,24 +117,35 @@ export type RunReport = {
     scored: number;
     source?: string;
     error?: string;
-    skipReasons?: { unrelated: number; duplicate: number; missing_description: number; error: number };
+    skipReasons?: SkipReasons;
   }[];
   sources?: Record<string, number>;
-  skipReasons?: { unrelated: number; duplicate: number; missing_description: number; error: number };
+  skipReasons?: SkipReasons;
   finishedAt?: string;
 };
 
-const ROLE_KEYWORDS = [
-  ".net", "c#", "asp.net", "software engineer", "full stack", "fullstack",
-  "full-stack", "backend", "back-end", "sql server", "azure", "java",
-];
-function matchesRoleFilter(j: { title?: string | null; description?: string | null }) {
-  const hay = `${j.title ?? ""}\n${j.description ?? ""}`.toLowerCase();
-  return ROLE_KEYWORDS.some((k) => hay.includes(k));
+export type SkipReasons = {
+  unrelated: number;
+  duplicate: number;
+  missing_description: number;
+  error: number;
+  non_us_location: number;
+  india_location: number;
+  unknown_location: number;
+  non_technical: number;
+};
+
+function emptySkipReasons(): SkipReasons {
+  return {
+    unrelated: 0, duplicate: 0, missing_description: 0, error: 0,
+    non_us_location: 0, india_location: 0, unknown_location: 0, non_technical: 0,
+  };
 }
 
 const MAX_JOBS_PER_COMPANY = 10;
 const MAX_JOBS_PER_RUN = 50;
+const US_SOFTWARE_PER_COMPANY = 20;
+const US_SOFTWARE_PER_RUN = 300;
 const COMPANY_TIMEOUT_MS = 5 * 60 * 1000;
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -144,13 +157,13 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 
 export async function runScrapeForUser(
   userId: string,
-  opts: { companyId?: string; maxJobs?: number; mode?: "normal" | "test" } = {},
+  opts: { companyId?: string; maxJobs?: number; mode?: "normal" | "test" | "us_software" } = {},
 ): Promise<RunReport> {
   const report: RunReport = {
     ok: true, scraped: 0, newJobs: 0, matched: 0, skipped: 0, scored: 0,
     companiesChecked: 0, extracted: 0, extractionFailed: 0,
     errors: [], companyStatuses: [], sources: {},
-    skipReasons: { unrelated: 0, duplicate: 0, missing_description: 0, error: 0 },
+    skipReasons: emptySkipReasons(),
   };
 
   const { data: profile } = await supabaseAdmin.from("profiles").select("*").eq("id", userId).maybeSingle();
@@ -161,8 +174,13 @@ export async function runScrapeForUser(
 
   let totalSavedThisRun = 0;
   const isTest = opts.mode === "test";
-  const perCompanyCap = isTest ? 5 : MAX_JOBS_PER_COMPANY;
-  const runCap = isTest ? (opts.maxJobs ?? 5) : Math.min(opts.maxJobs ?? MAX_JOBS_PER_RUN, MAX_JOBS_PER_RUN);
+  const isUsSoftware = opts.mode === "us_software";
+  const perCompanyCap = isTest ? 5 : isUsSoftware ? US_SOFTWARE_PER_COMPANY : MAX_JOBS_PER_COMPANY;
+  const runCap = isTest
+    ? (opts.maxJobs ?? 5)
+    : isUsSoftware
+      ? Math.min(opts.maxJobs ?? US_SOFTWARE_PER_RUN, US_SOFTWARE_PER_RUN)
+      : Math.min(opts.maxJobs ?? MAX_JOBS_PER_RUN, MAX_JOBS_PER_RUN);
 
   for (const c of companies ?? []) {
     let errorMsg: string | null = null;
@@ -174,7 +192,7 @@ export async function runScrapeForUser(
       found: 0, saved: 0, skipped: 0, scored: 0,
       source: undefined as string | undefined,
       error: undefined as string | undefined,
-      skipReasons: { unrelated: 0, duplicate: 0, missing_description: 0, error: 0 },
+      skipReasons: emptySkipReasons(),
     };
     report.companiesChecked += 1;
     if (totalSavedThisRun >= runCap) {
@@ -196,7 +214,9 @@ export async function runScrapeForUser(
       // For provider feeds we can pre-filter by description; for generic
       // results description is empty so filter only after extraction below.
       const providerHadDescription = source !== "generic" && source !== "firecrawl";
-      const preFiltered = providerHadDescription && !isTest ? allJobs.filter(matchesRoleFilter) : allJobs;
+      const preFiltered = providerHadDescription && !isTest
+        ? allJobs.filter((j) => hasAnyKeyword({ title: j.title, description: j.description }))
+        : allJobs;
       const preSkipped = providerHadDescription ? allJobs.length - preFiltered.length : 0;
       cStat.skipped += preSkipped;
       cStat.skipReasons.unrelated += preSkipped;
@@ -221,10 +241,11 @@ export async function runScrapeForUser(
           }
         }
         const finalTitle = extracted?.title || j.title;
-        const finalLocation = extracted?.location ?? j.location ?? null;
+        const finalLocationRaw = extracted?.location ?? j.location ?? null;
         const finalDepartment = extracted?.department ?? null;
         const finalDescription = extracted?.description ?? j.description ?? null;
         const finalRequirements = extracted?.requirements ?? null;
+        const finalQualifications = extracted?.qualifications ?? null;
         const extractionOk = providerHadDescription ? !!j.description : !!extracted?.diagnostics.success;
         const extractionDiag = extracted?.diagnostics ?? {
           success: !!j.description,
@@ -237,10 +258,14 @@ export async function runScrapeForUser(
         };
         if (extractionOk) report.extracted += 1; else report.extractionFailed += 1;
 
-        // For generic sources, apply the role filter AFTER extraction so we
-        // can read the real description text. Test mode bypasses the filter.
+        // For generic sources, apply the keyword filter AFTER extraction so we
+        // can read the full description text. Test mode bypasses the filter.
         if (!providerHadDescription && !isTest) {
-          const passes = matchesRoleFilter({ title: finalTitle, description: finalDescription });
+          const passes = hasAnyKeyword({
+            title: finalTitle, description: finalDescription,
+            requirements: finalRequirements, qualifications: finalQualifications,
+            department: finalDepartment,
+          });
           if (!passes) {
             report.skipped += 1;
             cStat.skipped += 1;
@@ -261,6 +286,38 @@ export async function runScrapeForUser(
           }
         }
 
+        // Parse location + keywords for storage and US-only filtering.
+        const parsedLoc = parseLocation(finalLocationRaw);
+        const matched = matchKeywords({
+          title: finalTitle, description: finalDescription,
+          requirements: finalRequirements, qualifications: finalQualifications,
+          department: finalDepartment,
+        });
+        const roleClass = classifyRole(finalTitle, finalDescription);
+
+        // us_software mode: drop non-US (India/intl) and non-technical roles.
+        if (isUsSoftware) {
+          if (roleClass === "rejected") {
+            report.skipped += 1; cStat.skipped += 1;
+            cStat.skipReasons.non_technical += 1; report.skipReasons!.non_technical += 1;
+            continue;
+          }
+          if (isIndiaLocation(parsedLoc)) {
+            report.skipped += 1; cStat.skipped += 1;
+            cStat.skipReasons.india_location += 1; report.skipReasons!.india_location += 1;
+            continue;
+          }
+          // Allow US OR remote-with-unknown-country (commonly remote-US).
+          const isRemoteUnknown = parsedLoc.work_mode === "remote" && !parsedLoc.country;
+          if (!isUSLocation(parsedLoc) && !isRemoteUnknown) {
+            const reason: keyof SkipReasons = parsedLoc.country ? "non_us_location" : "unknown_location";
+            report.skipped += 1; cStat.skipped += 1;
+            cStat.skipReasons[reason] += 1;
+            report.skipReasons![reason] += 1;
+            continue;
+          }
+        }
+
         const { data: inserted, error: insErr } = await supabaseAdmin
           .from("jobs")
           .upsert(
@@ -269,7 +326,13 @@ export async function runScrapeForUser(
               company_id: c.id,
               company_name: c.name,
               title: finalTitle,
-              location: finalLocation,
+              location: finalLocationRaw,
+              raw_location: finalLocationRaw,
+              city: parsedLoc.city,
+              state: parsedLoc.state,
+              country: parsedLoc.country,
+              work_mode: parsedLoc.work_mode,
+              matched_keywords: matched,
               employment_type: j.employment_type ?? null,
               posted_date: j.posted_date ?? null,
               apply_url: j.apply_url,

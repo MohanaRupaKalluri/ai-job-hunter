@@ -242,8 +242,10 @@ export type Database = {
       jobs: {
         Row: {
           apply_url: string
+          city: string | null
           company_id: string | null
           company_name: string
+          country: string | null
           created_at: string
           department: string | null
           description: string | null
@@ -254,16 +256,22 @@ export type Database = {
           extraction_status: string | null
           id: string
           location: string | null
+          matched_keywords: string[] | null
           posted_date: string | null
+          raw_location: string | null
           requirements: string | null
           source_url: string | null
+          state: string | null
           title: string
           user_id: string
+          work_mode: string | null
         }
         Insert: {
           apply_url: string
+          city?: string | null
           company_id?: string | null
           company_name: string
+          country?: string | null
           created_at?: string
           department?: string | null
           description?: string | null
@@ -274,16 +282,22 @@ export type Database = {
           extraction_status?: string | null
           id?: string
           location?: string | null
+          matched_keywords?: string[] | null
           posted_date?: string | null
+          raw_location?: string | null
           requirements?: string | null
           source_url?: string | null
+          state?: string | null
           title: string
           user_id: string
+          work_mode?: string | null
         }
         Update: {
           apply_url?: string
+          city?: string | null
           company_id?: string | null
           company_name?: string
+          country?: string | null
           created_at?: string
           department?: string | null
           description?: string | null
@@ -294,11 +308,15 @@ export type Database = {
           extraction_status?: string | null
           id?: string
           location?: string | null
+          matched_keywords?: string[] | null
           posted_date?: string | null
+          raw_location?: string | null
           requirements?: string | null
           source_url?: string | null
+          state?: string | null
           title?: string
           user_id?: string
+          work_mode?: string | null
         }
         Relationships: [
           {

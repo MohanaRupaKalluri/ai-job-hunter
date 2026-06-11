@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { listJobs, triggerScrapeForMe, importJobManual, clearAllJobs, getLatestScrapeRun } from "@/lib/api/jobs.functions";
 import { Switch } from "@/components/ui/switch";
+import { DEFAULT_CHIP_KEYWORDS } from "@/lib/job-keywords";
 import { generateResumeForJob, generateCoverLetterForJob } from "@/lib/api/documents.functions";
 import { upsertApplication, recordApplyAction } from "@/lib/api/applications.functions";
 
@@ -52,8 +53,16 @@ function JobsPage() {
   const [sortBy, setSortBy] = useState<"score"|"newest">("score");
   const [softwareOnly, setSoftwareOnly] = useState(true);
   const [hideRejected, setHideRejected] = useState(true);
+  const [activeChips, setActiveChips] = useState<string[]>([]);
+  const [workMode, setWorkMode] = useState<"any"|"remote"|"hybrid"|"onsite">("any");
+  const [usOnly, setUsOnly] = useState(false);
+  const [showInternational, setShowInternational] = useState(false);
+  const [excludeIndia, setExcludeIndia] = useState(true);
+  const [stateFilter, setStateFilter] = useState("");
+  const [cityFilter, setCityFilter] = useState("");
   const [confirmJob, setConfirmJob] = useState<{id:string; apply_url:string; title:string}|null>(null);
   const [confirmScrape, setConfirmScrape] = useState(false);
+  const [confirmUsScrape, setConfirmUsScrape] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -61,8 +70,16 @@ function JobsPage() {
   const [importForm, setImportForm] = useState({ url: "", title: "", company: "", location: "", description: "" });
 
   const { data: jobs, isLoading } = useQuery({
-    queryKey: ["jobs", search, minScore, category, sortBy, softwareOnly, hideRejected],
-    queryFn: () => listFn({ data: { search: search || undefined, minScore: Number(minScore) || undefined, category, sortBy, softwareOnly, hideRejected } }),
+    queryKey: ["jobs", search, minScore, category, sortBy, softwareOnly, hideRejected, activeChips, workMode, usOnly, showInternational, excludeIndia, stateFilter, cityFilter],
+    queryFn: () => listFn({ data: {
+      search: search || undefined,
+      minScore: Number(minScore) || undefined,
+      category, sortBy, softwareOnly, hideRejected,
+      keywords: activeChips.length ? activeChips : undefined,
+      workMode, usOnly, showInternational, excludeIndia,
+      state: stateFilter || undefined,
+      city: cityFilter || undefined,
+    } }),
   });
   const { data: latestRun } = useQuery({
     queryKey: ["latest-scrape"],
@@ -70,7 +87,7 @@ function JobsPage() {
   });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["jobs"] });
   const scrape = useMutation({
-    mutationFn: () => scrapeFn({ data: {} }),
+    mutationFn: (mode: "normal" | "us_software" = "normal") => scrapeFn({ data: { mode } }),
     onSuccess: (r: any) => {
       setLastReport(r);
       setLogsOpen(true);
@@ -126,6 +143,9 @@ function JobsPage() {
           <Button variant="outline" onClick={() => setImportOpen(true)}><Plus className="h-4 w-4 mr-2" />Import URL</Button>
           <Button variant="outline" onClick={() => { setLastReport((latestRun as any)?.metadata ?? null); setLogsOpen(true); }}><ScrollText className="h-4 w-4 mr-2" />Scrape logs</Button>
           <Button variant="outline" onClick={() => setConfirmClear(true)} disabled={!jobs?.length}><Trash2 className="h-4 w-4 mr-2" />Clear jobs</Button>
+          <Button variant="outline" onClick={() => setConfirmUsScrape(true)} disabled={scrape.isPending}>
+            {scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}US software only
+          </Button>
           <Button onClick={() => setConfirmScrape(true)} disabled={scrape.isPending}>{scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}Scrape now</Button>
         </div>
       </div>
@@ -135,9 +155,50 @@ function JobsPage() {
         <Select value={category} onValueChange={(v) => setCategory(v as any)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All categories</SelectItem><SelectItem value="excellent">Excellent</SelectItem><SelectItem value="strong">Strong</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="weak">Weak</SelectItem></SelectContent></Select>
         <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="score">Sort by score</SelectItem><SelectItem value="newest">Sort by newest</SelectItem></SelectContent></Select>
       </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+        <Select value={workMode} onValueChange={(v) => setWorkMode(v as any)}>
+          <SelectTrigger><SelectValue placeholder="Work mode" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any work mode</SelectItem>
+            <SelectItem value="remote">Remote</SelectItem>
+            <SelectItem value="hybrid">Hybrid</SelectItem>
+            <SelectItem value="onsite">Onsite</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input placeholder="State (e.g. Texas)" value={stateFilter} onChange={(e) => setStateFilter(e.target.value)} />
+        <Input placeholder="City (e.g. Austin)" value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} />
+      </div>
+      <div className="flex flex-wrap gap-2 mt-3">
+        {DEFAULT_CHIP_KEYWORDS.map((k) => {
+          const active = activeChips.includes(k);
+          return (
+            <button
+              key={k}
+              onClick={() => setActiveChips((prev) => active ? prev.filter((x) => x !== k) : [...prev, k])}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${active ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 text-foreground border-border hover:bg-muted"}`}
+            >{k}</button>
+          );
+        })}
+        <button
+          onClick={() => setUsOnly((v) => !v)}
+          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${usOnly ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 text-foreground border-border hover:bg-muted"}`}
+        >United States</button>
+        <button
+          onClick={() => setWorkMode((v) => v === "remote" ? "any" : "remote")}
+          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${workMode === "remote" ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 text-foreground border-border hover:bg-muted"}`}
+        >Remote</button>
+        {activeChips.length || usOnly || workMode !== "any" || stateFilter || cityFilter ? (
+          <button
+            onClick={() => { setActiveChips([]); setUsOnly(false); setWorkMode("any"); setStateFilter(""); setCityFilter(""); }}
+            className="text-xs px-2.5 py-1 rounded-full border bg-transparent text-muted-foreground hover:bg-muted"
+          >Clear filters</button>
+        ) : null}
+      </div>
       <div className="flex flex-wrap gap-6 mt-3 text-sm">
         <label className="flex items-center gap-2 cursor-pointer"><Switch checked={softwareOnly} onCheckedChange={setSoftwareOnly} />Software jobs only</label>
         <label className="flex items-center gap-2 cursor-pointer"><Switch checked={hideRejected} onCheckedChange={setHideRejected} />Hide rejected roles (interns, sales, etc.)</label>
+        <label className="flex items-center gap-2 cursor-pointer"><Switch checked={excludeIndia} onCheckedChange={setExcludeIndia} />Exclude India</label>
+        <label className="flex items-center gap-2 cursor-pointer"><Switch checked={showInternational} onCheckedChange={setShowInternational} />Show international jobs</label>
       </div>
       </Card>
       {isLoading ? (
@@ -150,9 +211,9 @@ function JobsPage() {
           </div>
           <div className="flex flex-wrap gap-2 justify-center">
             <Button variant="outline" asChild><Link to="/companies"><RefreshCw className="h-4 w-4 mr-2" />Scrape Selected Company</Link></Button>
-            <Button onClick={() => setConfirmScrape(true)} disabled={scrape.isPending}>
+            <Button onClick={() => setConfirmUsScrape(true)} disabled={scrape.isPending}>
               {scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-              Scrape All Tracked Companies
+              Scrape All — US Software Only
             </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)}><Plus className="h-4 w-4 mr-2" />Import Job URL</Button>
           </div>
@@ -167,7 +228,28 @@ function JobsPage() {
         <Card key={j.id} className="p-4"><div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold truncate">{j.title}</h3>{j.match && (<Badge variant="outline" className={scoreColor(score)}><Sparkles className="h-3 w-3 mr-1" />{score} • {j.match.category}</Badge>)}</div>
-            <p className="text-sm text-muted-foreground mt-0.5">{j.company_name}{j.location ? ` • ${j.location}` : ""}{j.employment_type ? ` • ${j.employment_type}` : ""}</p>
+            <p className="text-sm text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>{j.company_name}</span>
+              {j.location ? (
+                <span>• {j.location}</span>
+              ) : (
+                <Badge variant="outline" className="text-xs">Location Unknown</Badge>
+              )}
+              {j.work_mode && j.work_mode !== "unknown" ? (
+                <Badge variant="secondary" className="text-xs capitalize">{j.work_mode}</Badge>
+              ) : null}
+              {j.country && j.country !== "United States" ? (
+                <Badge variant="outline" className="text-xs">{j.country}</Badge>
+              ) : null}
+              {j.employment_type ? <span>• {j.employment_type}</span> : null}
+            </p>
+            {j.matched_keywords?.length ? (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {j.matched_keywords.slice(0, 8).map((k: string) => (
+                  <Badge key={k} variant="secondary" className="text-xs">{k}</Badge>
+                ))}
+              </div>
+            ) : null}
             {j.match?.rationale && (<p className="text-xs text-muted-foreground mt-2 line-clamp-2">{j.match.rationale}</p>)}
             {j.match?.matched_skills?.length ? (<div className="flex flex-wrap gap-1 mt-2">{j.match.matched_skills.slice(0,6).map((s: string) => (<Badge key={s} variant="secondary" className="text-xs">{s}</Badge>))}</div>) : null}
           </div>
@@ -220,7 +302,21 @@ function JobsPage() {
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setConfirmScrape(false)}>Cancel</Button>
-            <Button onClick={() => { setConfirmScrape(false); scrape.mutate(); }}>Run full scrape</Button>
+            <Button onClick={() => { setConfirmScrape(false); scrape.mutate("normal"); }}>Run full scrape</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={confirmUsScrape} onOpenChange={setConfirmUsScrape}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-400" />Scrape all — US software only?</DialogTitle>
+            <DialogDescription>
+              Runs a wider sweep capped at <strong>20 jobs per company</strong> and <strong>300 jobs total</strong>. Skips non-software roles, India, and other non-US locations before saving. You'll see per-skip reasons in the scrape log.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmUsScrape(false)}>Cancel</Button>
+            <Button onClick={() => { setConfirmUsScrape(false); scrape.mutate("us_software"); }}>Run US software scrape</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -256,7 +352,11 @@ function JobsPage() {
               </div>
               {lastReport.skipReasons ? (
                 <div className="text-xs text-muted-foreground">
-                  Skip reasons — unrelated role: {lastReport.skipReasons.unrelated} · duplicate: {lastReport.skipReasons.duplicate} · missing description: {lastReport.skipReasons.missing_description} · error: {lastReport.skipReasons.error}
+                  Skip reasons —{" "}
+                  {Object.entries(lastReport.skipReasons)
+                    .filter(([, v]: any) => Number(v) > 0)
+                    .map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`)
+                    .join(" · ") || "none"}
                 </div>
               ) : null}
               <div className="rounded border overflow-hidden">
