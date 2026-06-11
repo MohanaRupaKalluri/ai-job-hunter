@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
-import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2, Plus, Trash2, AlertTriangle, Info, RotateCw } from "lucide-react";
+import { ExternalLink, FileText, Mail, Bookmark, Sparkles, Download, RefreshCw, Loader2, Plus, Trash2, AlertTriangle, Info, RotateCw, ScrollText } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { listJobs, triggerScrapeForMe, importJobManual, clearAllJobs } from "@/lib/api/jobs.functions";
+import { listJobs, triggerScrapeForMe, importJobManual, clearAllJobs, getLatestScrapeRun } from "@/lib/api/jobs.functions";
 import { Switch } from "@/components/ui/switch";
 import { generateResumeForJob, generateCoverLetterForJob } from "@/lib/api/documents.functions";
 import { upsertApplication, recordApplyAction } from "@/lib/api/applications.functions";
@@ -40,6 +40,7 @@ function JobsPage() {
   const scrapeFn = useServerFn(triggerScrapeForMe);
   const importFn = useServerFn(importJobManual);
   const clearFn = useServerFn(clearAllJobs);
+  const latestFn = useServerFn(getLatestScrapeRun);
   const resumeFn = useServerFn(generateResumeForJob);
   const coverFn = useServerFn(generateCoverLetterForJob);
   const saveFn = useServerFn(upsertApplication);
@@ -55,20 +56,29 @@ function JobsPage() {
   const [confirmScrape, setConfirmScrape] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [lastReport, setLastReport] = useState<any | null>(null);
   const [importForm, setImportForm] = useState({ url: "", title: "", company: "", location: "", description: "" });
 
   const { data: jobs, isLoading } = useQuery({
     queryKey: ["jobs", search, minScore, category, sortBy, softwareOnly, hideRejected],
     queryFn: () => listFn({ data: { search: search || undefined, minScore: Number(minScore) || undefined, category, sortBy, softwareOnly, hideRejected } }),
   });
+  const { data: latestRun } = useQuery({
+    queryKey: ["latest-scrape"],
+    queryFn: () => latestFn(),
+  });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["jobs"] });
   const scrape = useMutation({
     mutationFn: () => scrapeFn({ data: {} }),
     onSuccess: (r: any) => {
+      setLastReport(r);
+      setLogsOpen(true);
       toast.success(
-        `Checked ${r.companiesChecked} cos · found ${r.scraped} · saved ${r.newJobs} · skipped ${r.skipped} · scored ${r.scored}${r.errors?.length ? ` · ${r.errors.length} errors` : ""}`,
+        `Checked ${r.companiesChecked} cos · found ${r.scraped} · saved ${r.newJobs} · filtered ${r.skipped} · scored ${r.scored}${r.errors?.length ? ` · ${r.errors.length} errors` : ""}`,
       );
       invalidate();
+      qc.invalidateQueries({ queryKey: ["latest-scrape"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -114,6 +124,7 @@ function JobsPage() {
           <Button variant="outline" onClick={() => exportRows("csv")} disabled={!jobs?.length}><Download className="h-4 w-4 mr-2" />CSV</Button>
           <Button variant="outline" onClick={() => exportRows("xlsx")} disabled={!jobs?.length}><Download className="h-4 w-4 mr-2" />XLSX</Button>
           <Button variant="outline" onClick={() => setImportOpen(true)}><Plus className="h-4 w-4 mr-2" />Import URL</Button>
+          <Button variant="outline" onClick={() => { setLastReport((latestRun as any)?.metadata ?? null); setLogsOpen(true); }}><ScrollText className="h-4 w-4 mr-2" />Scrape logs</Button>
           <Button variant="outline" onClick={() => setConfirmClear(true)} disabled={!jobs?.length}><Trash2 className="h-4 w-4 mr-2" />Clear jobs</Button>
           <Button onClick={() => setConfirmScrape(true)} disabled={scrape.isPending}>{scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}Scrape now</Button>
         </div>
@@ -129,7 +140,30 @@ function JobsPage() {
         <label className="flex items-center gap-2 cursor-pointer"><Switch checked={hideRejected} onCheckedChange={setHideRejected} />Hide rejected roles (interns, sales, etc.)</label>
       </div>
       </Card>
-      {isLoading ? (<Card className="p-12 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" /></Card>) : !jobs?.length ? (<Card className="p-12 text-center text-muted-foreground"><p className="font-medium">No jobs yet.</p><p className="text-sm mt-1">Add companies and click "Scrape now", or wait for the next 12h run.</p></Card>) : (<div className="grid gap-3">{jobs.map((j: any) => { const score = j.match?.overall_score ?? 0; const canGen = score >= 75; return (
+      {isLoading ? (
+        <Card className="p-12 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" /></Card>
+      ) : !jobs?.length ? (
+        <Card className="p-10 text-center space-y-4">
+          <div>
+            <p className="font-medium">No jobs found yet.</p>
+            <p className="text-sm text-muted-foreground mt-1">Try Scrape Selected Company or Import Job URL.</p>
+          </div>
+          <div className="flex flex-wrap gap-2 justify-center">
+            <Button variant="outline" asChild><Link to="/companies"><RefreshCw className="h-4 w-4 mr-2" />Scrape Selected Company</Link></Button>
+            <Button onClick={() => setConfirmScrape(true)} disabled={scrape.isPending}>
+              {scrape.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+              Scrape All Tracked Companies
+            </Button>
+            <Button variant="outline" onClick={() => setImportOpen(true)}><Plus className="h-4 w-4 mr-2" />Import Job URL</Button>
+          </div>
+          {latestRun ? (
+            <p className="text-xs text-muted-foreground">
+              Last run: saved {(latestRun as any).metadata?.newJobs ?? 0} of {(latestRun as any).metadata?.scraped ?? 0} discovered ·{" "}
+              <button className="underline" onClick={() => { setLastReport((latestRun as any).metadata); setLogsOpen(true); }}>view scrape logs</button>
+            </p>
+          ) : null}
+        </Card>
+      ) : (<div className="grid gap-3">{jobs.map((j: any) => { const score = j.match?.overall_score ?? 0; const canGen = score >= 75; return (
         <Card key={j.id} className="p-4"><div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold truncate">{j.title}</h3>{j.match && (<Badge variant="outline" className={scoreColor(score)}><Sparkles className="h-3 w-3 mr-1" />{score} • {j.match.category}</Badge>)}</div>
@@ -202,6 +236,87 @@ function JobsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={logsOpen} onOpenChange={setLogsOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Scrape logs</DialogTitle>
+            <DialogDescription>Per-company breakdown of the latest scrape run.</DialogDescription>
+          </DialogHeader>
+          {lastReport ? (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <Stat label="Companies" value={lastReport.companiesChecked} />
+                <Stat label="Jobs discovered" value={lastReport.scraped} />
+                <Stat label="Jobs saved" value={lastReport.newJobs} />
+                <Stat label="Jobs filtered" value={lastReport.skipped} />
+                <Stat label="Jobs scored" value={lastReport.scored} />
+                <Stat label="Extracted" value={lastReport.extracted} />
+                <Stat label="Extract failed" value={lastReport.extractionFailed} />
+                <Stat label="Errors" value={lastReport.errors?.length ?? 0} />
+              </div>
+              {lastReport.skipReasons ? (
+                <div className="text-xs text-muted-foreground">
+                  Skip reasons — unrelated role: {lastReport.skipReasons.unrelated} · duplicate: {lastReport.skipReasons.duplicate} · missing description: {lastReport.skipReasons.missing_description} · error: {lastReport.skipReasons.error}
+                </div>
+              ) : null}
+              <div className="rounded border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-2">Company</th>
+                      <th className="text-left p-2">Provider</th>
+                      <th className="text-left p-2">Status</th>
+                      <th className="text-right p-2">Found</th>
+                      <th className="text-right p-2">Saved</th>
+                      <th className="text-right p-2">Skipped</th>
+                      <th className="text-left p-2">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(lastReport.companyStatuses ?? []).map((s: any, i: number) => (
+                      <tr key={i} className="border-t">
+                        <td className="p-2 font-medium">
+                          {s.company}
+                          {s.url ? <div className="text-muted-foreground truncate max-w-[14rem]">{s.url}</div> : null}
+                        </td>
+                        <td className="p-2">{s.source ?? "—"}</td>
+                        <td className="p-2">
+                          <span className={
+                            s.status === "success" ? "text-emerald-300" :
+                            s.status === "partial" ? "text-amber-300" :
+                            s.status === "timeout" ? "text-orange-300" :
+                            s.status === "failed" ? "text-destructive" : "text-muted-foreground"
+                          }>{s.status}</span>
+                        </td>
+                        <td className="p-2 text-right">{s.found}</td>
+                        <td className="p-2 text-right">{s.saved}</td>
+                        <td className="p-2 text-right">{s.skipped}</td>
+                        <td className="p-2 text-muted-foreground">
+                          {s.error ?? (s.skipReasons
+                            ? Object.entries(s.skipReasons).filter(([,v]: any) => v > 0).map(([k,v]) => `${k.replace("_"," ")}: ${v}`).join(" · ")
+                            : "")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No scrape runs yet. Click "Scrape now" to start one.</p>
+          )}
+          <DialogFooter><Button variant="ghost" onClick={() => setLogsOpen(false)}>Close</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="rounded border bg-muted/30 p-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="font-semibold">{String(value ?? 0)}</div>
     </div>
   );
 }
