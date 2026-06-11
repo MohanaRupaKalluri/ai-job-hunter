@@ -79,13 +79,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "AI Job Hunter — Automate your job search" },
-      { name: "description", content: "AI-powered job discovery, ATS resume generation, and application tracking on autopilot." },
-      { property: "og:title", content: "AI Job Hunter" },
-      { property: "og:description", content: "Find, match, and apply to jobs automatically with AI." },
+      { title: "AI Job Hunter — AI-Powered Job Discovery & Resume Matching" },
+      { name: "description", content: "Discover jobs from company career sites, match them against your resume, generate ATS-friendly resumes and cover letters, and track applications in one place." },
+      { property: "og:title", content: "AI Job Hunter — AI-Powered Job Discovery & Resume Matching" },
+      { property: "og:description", content: "Discover jobs from company career sites, match them against your resume, generate ATS-friendly resumes and cover letters, and track applications in one place." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "AI Job Hunter — AI-Powered Job Discovery & Resume Matching" },
+      { name: "twitter:description", content: "Discover jobs from company career sites, match them against your resume, generate ATS-friendly resumes and cover letters, and track applications in one place." },
+      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/4cf04ba2-2148-403a-b51d-53c2c99953ca" },
+      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/4cf04ba2-2148-403a-b51d-53c2c99953ca" },
     ],
     links: [
       {
