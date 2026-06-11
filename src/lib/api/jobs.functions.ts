@@ -23,6 +23,7 @@ export const listJobs = createServerFn({ method: "POST" })
         usOnly: z.boolean().optional(),
         excludeIndia: z.boolean().optional(),
         showInternational: z.boolean().optional(),
+        country: z.enum(["us", "canada", "remote", "international", "any"]).optional(),
         state: z.string().trim().max(80).optional(),
         city: z.string().trim().max(120).optional(),
       })
@@ -59,21 +60,25 @@ export const listJobs = createServerFn({ method: "POST" })
         return hay.includes(s);
       });
     }
-    // Default location behavior: hide India + non-US unless user opts in.
+    // Hide India by default unless the user explicitly opts in.
     if (data.excludeIndia ?? true) {
       result = result.filter((r) => (r.country ?? "").toLowerCase() !== "india");
     }
-    if (data.usOnly) {
+    // Country dropdown takes precedence over the legacy usOnly flag.
+    const country = data.country ?? (data.usOnly ? "us" : data.showInternational ? "any" : "us");
+    if (country === "us") {
       result = result.filter((r) => {
         const c = (r.country ?? "").toLowerCase();
-        // Allow US, or remote with unknown country (commonly remote-US).
-        return c === "united states" || (!r.country && r.work_mode === "remote");
+        return c === "united states" || (!r.country && r.work_mode === "remote") || !r.country;
       });
-    } else if (!data.showInternational) {
-      // Default: hide explicitly non-US jobs; keep US + unknown-country.
+    } else if (country === "canada") {
+      result = result.filter((r) => (r.country ?? "").toLowerCase() === "canada");
+    } else if (country === "remote") {
+      result = result.filter((r) => r.work_mode === "remote");
+    } else if (country === "international") {
       result = result.filter((r) => {
         const c = (r.country ?? "").toLowerCase();
-        return !c || c === "united states";
+        return c && c !== "united states";
       });
     }
     // Keyword chip filter: match against stored matched_keywords OR recompute

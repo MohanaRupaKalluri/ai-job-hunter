@@ -41,7 +41,7 @@ const NON_US_HINTS: Array<{ re: RegExp; country: string }> = [
   { re: /\b(japan|tokyo|osaka)\b/i, country: "Japan" },
   { re: /\b(china|shanghai|beijing|shenzhen)\b/i, country: "China" },
   { re: /\b(poland|warsaw|kraków|krakow)\b/i, country: "Poland" },
-  { re: /\b(netherlands|amsterdam|rotterdam)\b/i, country: "Netherlands" },
+  { re: /\b(netherlands|nederlands|nederland|amsterdam|rotterdam|the hague|den haag|utrecht|eindhoven)\b/i, country: "Netherlands" },
   { re: /\b(israel|tel aviv)\b/i, country: "Israel" },
   { re: /\b(emea|apac|latam)\b/i, country: "International" },
 ];
@@ -97,4 +97,34 @@ export function isUSLocation(loc: { country?: string | null }): boolean {
 
 export function isIndiaLocation(loc: { country?: string | null }): boolean {
   return (loc.country ?? "").toLowerCase() === "india";
+}
+
+/**
+ * Render a job's structured location for display in cards/lists.
+ * Example outputs:
+ *   "Remote • United States"
+ *   "Hybrid • Columbus, Ohio, United States"
+ *   "Onsite • Dallas, Texas, United States"
+ *   "Location unavailable"
+ */
+export function formatJobLocation(j: {
+  work_mode?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  location?: string | null;
+  raw_location?: string | null;
+}): string {
+  const modeRaw = (j.work_mode ?? "").toLowerCase();
+  const mode =
+    modeRaw === "remote" ? "Remote" :
+    modeRaw === "hybrid" ? "Hybrid" :
+    modeRaw === "onsite" ? "Onsite" : null;
+  const geo = [j.city, j.state, j.country].filter(Boolean).join(", ");
+  if (mode && geo) return `${mode} • ${geo}`;
+  if (mode) return `${mode} • ${j.country ?? "Location unavailable"}`;
+  if (geo) return geo;
+  const raw = (j.location ?? j.raw_location ?? "").trim();
+  if (raw) return raw;
+  return "Location unavailable";
 }

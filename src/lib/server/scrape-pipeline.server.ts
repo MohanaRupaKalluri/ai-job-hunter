@@ -240,7 +240,9 @@ export async function runScrapeForUser(
             extracted = null;
           }
         }
-        const finalTitle = extracted?.title || j.title;
+        // Prefer the title from the listing — extractor sometimes scrapes a
+        // language splash like "Nederlands" or a brand "About Us" page title.
+        const finalTitle = (j.title && j.title.trim()) || extracted?.title || "Untitled role";
         const finalLocationRaw = extracted?.location ?? j.location ?? null;
         const finalDepartment = extracted?.department ?? null;
         const finalDescription = extracted?.description ?? j.description ?? null;
