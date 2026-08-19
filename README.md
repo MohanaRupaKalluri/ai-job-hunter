@@ -1,6 +1,8 @@
 # AI Job Hunter
 
-Automated, AI-powered job search assistant. Discover roles from company career sites, score them against your resume, generate tailored resumes and cover letters, and track every application — all from one dashboard.
+> Automated, AI-powered job search assistant. Discover roles from company career sites, score them against your resume, generate tailored resumes and cover letters, and track every application — all from one dashboard.
+> 
+> See it in my portfolio: **[mohana-kalluri.lovable.app](https://mohana-kalluri.lovable.app/)**
 
 Built on **TanStack Start** (React 19 + Vite 7), **Lovable Cloud** (Supabase), and the **Lovable AI Gateway**.
 
@@ -50,7 +52,7 @@ Built on **TanStack Start** (React 19 + Vite 7), **Lovable Cloud** (Supabase), a
 ### Install
 
 ```bash
-git clone https://github.com/YOUR_ORG/ai-job-hunter.git
+git clone https://github.com/MohanaRupaKalluri/ai-job-hunter.git
 cd ai-job-hunter
 bun install
 cp .env.example .env
@@ -96,6 +98,9 @@ The app is a standard TanStack Start project and runs on any host that supports 
 
 This project is actively being improved with better job matching, resume generation, and application tracking workflows.
 
+## Portfolio
+
+See this project and more in my data/AI portfolio: **[mohana-kalluri.lovable.app](https://mohana-kalluri.lovable.app/)**
 
 ## Screenshots
 
@@ -104,7 +109,7 @@ This project is actively being improved with better job matching, resume generat
 | | |
 |---|---|
 Dashboard
-<img width="556" height="691" alt="image" src="https://github.com/user-attachments/assets/829f8706-b768-44b4-a610-92879020f3d5" />
+<img width="556" height="691" alt="image" src="https://github.com/user-attachments/assets/829f8706-b768-44b4-a610-92879020d3d5" />
 
 
 ## Contributing
