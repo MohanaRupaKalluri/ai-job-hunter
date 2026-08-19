@@ -2,7 +2,7 @@
 
 > Automated, AI-powered job search assistant. Discover roles from company career sites, score them against your resume, generate tailored resumes and cover letters, and track every application — all from one dashboard.
 > 
-> See it in my portfolio: **[mohana-kalluri.lovable.app](https://mohana-kalluri.lovable.app/)**
+> See it in my portfolio: **[meetmohana.lovable.app](https://meetmohana.lovable.app/)**
 
 Built on **TanStack Start** (React 19 + Vite 7), **Lovable Cloud** (Supabase), and the **Lovable AI Gateway**.
 
@@ -100,7 +100,7 @@ This project is actively being improved with better job matching, resume generat
 
 ## Portfolio
 
-See this project and more in my data/AI portfolio: **[mohana-kalluri.lovable.app](https://mohana-kalluri.lovable.app/)**
+See this project and more in my data/AI portfolio: **[meetmohana.lovable.app](https://meetmohana.lovable.app/)**
 
 ## Screenshots
 
